@@ -5034,7 +5034,7 @@ goserver-5f949ccff9-pgbs6   1/1     Running   1 (29s ago)   64s
 
 
 
-Agora que esta funcionando, uma dasalternativas para vermos ele funcionando é o kubectl topcom o nomedo Pod.
+Agora que esta funcionando, uma das alternativas para vermos ele funcionando é o kubectl top com o nome do Pod.
 
 ```bash
 ❯ kubectl top pod goserver-5f949ccff9-pgbs6
@@ -5042,15 +5042,1621 @@ NAME                        CPU(cores)   MEMORY(bytes)
 goserver-5f949ccff9-pgbs6   0m           1Mi 
 ```
 
-Entao qui ele vai mostrar como esta o nossoconsumo e comoele esta rmrelacao à parte de memória.
+Entao aqui ele vai mostrar como esta o nosso consumo e como ele esta em relacao à parte de memória.
 
-Agora que temos essa opção conosco, vamosperceber que se começcarmosa utilizar muito esse Pod, ele vai chegar no limite e vai começar a usar todo esse limite, nao vai mais conseguir servir as requisições e entao vai engasgar o nosso serviço e acontecercomo em qualquer itra máquina.
+Agora que temos essa opção conosco, vamos perceber que se começarmos a utilizar muito esse Pod, ele vai chegar no limite e vai começar a usar todo esse limite, nao vai mais conseguir servir as requisições e entao vai engasgar o nosso serviço e acontecer como em qualquer outra máquina.
 
-Logo, uma vez que fazemos isso, estamos delimitando e para podermos escalr, bata, dnesse caso, criarmos mais replicas!
+Logo, uma vez que fazemos isso, estamos delimitando e para podermos escalar, basta, nesse caso, criarmos mais replicas!
 
-A partir de agoa estamos prontos para poder criarmos mais replias e conforme criamos mais replicas, e começamos a acessar os services, o k8s vai cmeçar a fazer o balanceamento de carga para que tenhamos uma distribuição mas igual para trabalharmos commais pods para suportar todos os acessos, mas mesmo assim limitando o uso de recursos dentrodo nosso CLuster!
+A partir de agora estamos prontos para poder criarmos mais replias e conforme criamos mais replicas, e começamos a acessar os services, o k8s vai cmeçar a fazer o balanceamento de carga para que tenhamos uma distribuição mas igual para trabalharmos commais pods para suportar todos os acessos, mas mesmo assim limitando o uso de recursos dentrodo nosso CLuster!
 
 ## Criando e configurando um HPA
+
+Afinal, como fazemos para escalar?
+
+O HPA (hORIZONTAL POD AUTOSCALING) é o responsável por pegar aquelas metricas , verificando como está o trafego e como esta a cpu e memória. E baseado no estado de CPU ele vai começar a provisionar novas replicas para podermos trabalhar.
+
+Isso é'muuuuito importante!
+
+O HPA nao usa apenas a CPU como ponto de escala ou nao. Podemos utilizar mais metricxas ao mesmo tempo. Inclusive metricas customizadas. Por outro lado isso vai depender muito do tipo de aplicação e na maioria das vezes apenas o hpa de cpu vai funcionar.
+
+Se algum dia precisamos de outra metrica para escalar que nao seja o hpa de cpu, bastra acessar a documentaçao do k8s.
+
+Vamos ver agora como utilizar o hpa para nos auxiliar nos aspectos de escala!
+
+Criamos um novo arquivo chamado hpa.yaml:
+
+````yaml
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: goserver-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    name: goserver
+    kind: Deployment
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 30
+````
+
+
+
+Vamos aplicar o arquivo:
+
+````bash
+❯ kubectl apply -f k8s/hpa.yaml 
+horizontalpodautoscaler.autoscaling/goserver-hpa created
+````
+
+Pronto! Agora vamos verificar o hpa
+
+````bash
+❯ kubectl get hpa
+NAME           REFERENCE             TARGETS         MINPODS   MAXPODS   REPLICAS   AGE
+goserver-hpa   Deployment/goserver   <unknown>/30%   1         5         1          88s
+````
+
+Agora, temos como referencia o Deployment/goserver e o target temos como 30% para começar a agir. Porem, nesse momento o valor de cpu utilizado esta como desconhecido. 
+
+Como acabamos de criar, o k8s ainda demora de 1 a 2 minutos para conseguir criar as métricas no metric server.
+
+````bash
+❯ kubectl get hpa
+NAME           REFERENCE             TARGETS   MINPODS   MAXPODS   REPLICAS   AGE
+goserver-hpa   Deployment/goserver   0%/30%    1         5         1          3m26s
+````
+
+
+
+Executando novamente o comando, agora já'estamois conseguindo pegar as metricas e nesse momento estamos utilizando 0% de cpu.
+
+
+
+No proximo video, vamos usar uma ferramente para fazer o teste de estresse para acessar a aplicaçáo e verificar o hpa funcionado!
+
+
+
+## Versao da imagem para o teste de stress
+
+Na aula "Teste de stress com fortio" a imagem que está sendo utilizada é a rogeriocassares/hello-go:v9.7
+que é diferente da versão v5.5 usada no deployment.yaml da aula "Aplicando deployment com resources".
+
+O que muda é que na versão 5.5 o código do server.go gerava erro após 30 segundos de execução no pod.
+Na versão 9.7 este erro após 30 segundos é removido e o teste de stress funcionará normalmente.
+
+Versão 5.5 (rogeriocassares/hello-go:5.5)
+
+````go
+func Healthz(w http.ResponseWriter, r *http.Request) {
+  duration := time.Since(startedAt)
+
+  if duration.Seconds() < 10 || duration.Seconds() > 30 {
+    w.WriteHeader(500)
+    w.Write([]byte(fmt.Sprintf("Duration: %v", duration.Seconds())))
+  } else {
+    w.WriteHeader(200)
+    w.Write([]byte("ok"))
+  }
+}
+````
+
+
+
+Na versão 9.7 (rogeriocassares/hello-go:v9.7)
+
+````go
+func Healthz(w http.ResponseWriter, r *http.Request) {
+  duration := time.Since(startedAt)
+
+  if duration.Seconds() < 10 {
+    w.WriteHeader(500)
+    w.Write([]byte(fmt.Sprintf("Duration: %v", duration.Seconds())))
+  } else {
+    w.WriteHeader(200)
+    w.Write([]byte("ok"))
+  }
+}
+````
+
+
+
+Build uma nova imagem Dockerfile e push to the Docker Hub!
+
+````bash
+❯ docker build -t rogeriocassares/hello-go:v9.7 .
+❯ docker push rogeriocassares/hello-go:v9.7
+````
+
+
+
+Portanto, para que você consiga acompanhar a aula "Teste de stress com fortio", utilize a
+imagem `rogeriocassares/hello-go:v9.7 no deployment.yaml`.
+
+````yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: goserver
+  labels:
+    app: goserver
+spec:
+  selector:
+    matchLabels:
+      app: goserver
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: "goserver"
+    spec:
+      containers:
+        - name: goserver
+          image: "rogeriocassares/hello-go:v9.7"
+
+          resources:
+            requests:
+              cpu: "0.3"
+              memory: 20Mi
+            limits:
+              cpu: "0.3"
+              memory: 25Mi
+
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 30
+            failureThreshold: 1
+            # initialDelaySeconds: 10
+
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 3
+            failureThreshold: 1
+            # initialDelaySeconds: 10
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 5
+            failureThreshold: 1
+            timeoutSeconds: 1
+            successThreshold: 1
+            # initialDelaySeconds: 15
+
+          envFrom:
+            - configMapRef:
+                name: goserver-env
+            - secretRef:
+                name: goserver-secret
+
+          volumeMounts:
+            - mountPath: "/go/myfamily"
+              name: config
+              readOnly: true
+
+      volumes:
+        - name: config
+          configMap:
+            name: configmap-family
+            items:
+              - key: members
+                path: "family.txt"
+
+````
+
+Aplique agora o novo deployment.yaml
+
+````bash
+❯ kubectl apply -f k8s/deployment.yaml 
+````
+
+
+
+## Atualização no comando do Fortio
+
+Com a atualização do kubectl para a versão 1.21, o parâmetro --generator do comando
+
+````bash
+kubectl run -it --generator=run-pod/v1 fortio --rm --image=fortio/fortio -- load -qps 800 -t 120s -c 70 "http://goserver-service:8080/healthz"
+````
+
+
+passou a não ser mais suportado, apresentando o erro "Error: unknown flag: --generator".
+
+Para a realização do teste, execute o comando sem este parâmetro, ficando da seguinte maneira:
+
+````bash
+$ kubectl run -it fortio --rm --image=fortio/fortio -- load -qps 800 -t 120s -c 70 "http://goserver-service:8080/healthz"
+````
+
+
+Com isto, será possível ver os pods escalando no teste de stress.
+
+
+
+## Teste de stress com Fortio
+
+Essa ferramenta é uma ferramena em go e nos ajuda a passar parametros e cria threads para fazer o acesso, a quantidade de queries por segundo, a quantidade de tempo qque queremos executar e a url que queremos trabalhar vamnos ver funcionand o.
+
+O fortio tb tem uma imagem docker. Entao vamos criar um pod do fortio e quando esse pode for criado vamos pedir para ele gerar um teste de stress e tudo isso via comando para vermos como conseguomos executar uma operaçáo usando um pod e quando terminamos essa opereçao, ele mata o pod automaticamente. 
+
+Vamos rodar um pod do kubernets via terminal como se fosse um docker! Vamos rodar um pod no terminal e remover a imagem assim que ele acabar e essa imagem virá do docker hub fortio/fortio.
+
+````bash
+❯ kubectl run -it fortio --rm --image=fortio/fortio -- load -qps 800 -t 120s -c 70 "http://goserver-service:8080/healthz"
+````
+
+Entao criamos uma nova aba no terminal e digitamos
+
+````bash
+ ❯ watch -n1 kubectl get hpa
+ ----
+ Every 1,0s: kubectl get hpa                            rogerio-pc: Wed Nov 16 15:46:10 2022
+
+NAME           REFERENCE             TARGETS   MINPODS   MAXPODS   REPLICAS   AGE
+goserver-hpa   Deployment/goserver   6%/30%    1         5         1          65m
+````
+
+Dessa forma podemos perceber que, apesar de muitos acessos, o uso da CPU nao passou de 20%, e por isso nao conseguimos ver o hpa escalar para outros Pods.
+
+Entao, vamos siminuir o valor de cpu por request no arquivo de `deployments.yaml` de 0.3 para 0.05 de cpu.
+
+````yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: goserver
+  labels:
+    app: goserver
+spec:
+  selector:
+    matchLabels:
+      app: goserver
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: "goserver"
+    spec:
+      containers:
+        - name: goserver
+          image: "rogeriocassares/hello-go:v9.7"
+
+          resources:
+            requests:
+              cpu: "0.05"
+              memory: 20Mi
+            limits:
+              cpu: "0.05"
+              memory: 25Mi
+
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 30
+            failureThreshold: 1
+            # initialDelaySeconds: 10
+
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 3
+            failureThreshold: 1
+            # initialDelaySeconds: 10
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 5
+            failureThreshold: 1
+            timeoutSeconds: 1
+            successThreshold: 1
+            # initialDelaySeconds: 15
+
+          envFrom:
+            - configMapRef:
+                name: goserver-env
+            - secretRef:
+                name: goserver-secret
+
+          volumeMounts:
+            - mountPath: "/go/myfamily"
+              name: config
+              readOnly: true
+
+      volumes:
+        - name: config
+          configMap:
+            name: configmap-family
+            items:
+              - key: members
+                path: "family.txt"
+
+````
+
+
+
+E entao aplucamos novamentre o arquivo de deployment:
+
+````bash
+❯ kubectl apply -f k8s/deployment.yaml
+````
+
+Para conseguirmos visualizar o hpa funcionando
+
+````bash
+❯ kubectl run -it fortio --rm --image=fortio/fortio -- load -qps 800 -t 120s -c 70 "http://goserver-service:8080/healthz"
+````
+
+
+
+Entao, se vericarmos novamente o `kubectl get hpa`
+
+````bash
+❯ kubectl get hpa
+----
+NAME           REFERENCE             TARGETS
+   MINPODS   MAXPODS   REPLICAS   AGE
+goserver-hpa   Deployment/goserver   92%/30%
+   1         5         4          80m
+   
+````
+
+Vemos que foram criados 4 Pods com autoscaling!
+
+`````bàsh
+❯ kubectl get po
+----
+NAME                        READY   STATUS    RESTARTS   AGE
+goserver-7fdf7d7865-7zzmj   1/1     Running   0          10m
+fortio                      1/1     Running   0          2m11s
+goserver-7fdf7d7865-6z4qm   1/1     Running   0          94s
+goserver-7fdf7d7865-vzvmr   1/1     Running   0          64s
+goserver-7fdf7d7865-klgwg   1/1     Running   0          64s
+`````
+
+
+
+Para descer as replicas, o kubectl espera um determinado tempo para diminuir.
+
+Também é interessante usilizar uma ferramenta chamada k6.io para fazer teste de stress, pq da [ara fazer visita de varias paginas, pausar e etc.
+
+Vamos fazer ainda um otro deste e configurar o nosso hpa para até 30 pods:
+
+````yaml
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: goserver-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    name: goserver
+    kind: Deployment
+  minReplicas: 1
+  maxReplicas: 30
+  targetCPUUtilizationPercentage: 25
+````
+
+Aplicando o novo arquivo:
+
+````bash
+❯ kubectl apply -f k8s/hpa.yaml 
+````
+
+E entao executamos em um terminal co comando 
+
+````bash
+❯  watch -n1 kubectl get hpa
+````
+
+e no outro o teste de estresse por 220s:
+
+````bash
+❯ kubectl run -it fortio --rm --image=fortio/fortio -- load -qps 800 -t 220s -c 70 "http://goserver-service:8080/healthz"
+````
+
+
+
+Após um tempo, vimos que o hpa ultrapassou o limite de 25% de CPU e copmeçou a criar novas replicas do Pod. 
+
+````bash
+Every 1,0s: kubectl get hpa                     rogerio-pc: Wed Nov 16 16:15:41 2022
+
+NAME           REFERENCE             TARGETS   MINPODS   MAXPODS   REPLICAS   AGE
+goserver-hpa   Deployment/goserver   34%/25%   1         30        4          94m
+
+
+Every 1,0s: kubectl get hpa                     rogerio-pc: Wed Nov 16 16:17:05 2022
+
+NAME           REFERENCE             TARGETS   MINPODS   MAXPODS   REPLICAS   AGE
+goserver-hpa   Deployment/goserver   26%/25%   1         30        4          95m
+
+````
+
+Pronto! Lembrando que há a espera inicial de 10 segundos para os Pods ficarem prontos! E 4 pods com 5 miliCores de cpu deram conta do recado!
+
+
+
+## Statefulsets e Volumes Persistentes
+
+### Entendendo volumes persistentes
+
+Tudo o que fizemos até agora foi deploy  e escala de aplicaçáo que era totralemte stateless. Isto é, uma aplicaçao sem estado e nao interessa quantas vezes as requisiçoes acontecem que as sesspes nao estao guardadas na aplicaçáo.
+
+Mandamos requeste e recebemos response. Ao criar e remover pods os dados nao sao perdidos pois sao stateless. Nao ha problemas em perder dados.
+
+Por outrop lado, existem aplicaóés que desejamos persistior dados em nossas aplicaóés como o caesso a um DB. Conforme as operaçoes vao acaontecendo elas vao lendo e acessando. O porblema eh que se o pod for perdido, vamos perder os dados como a remoçao de um container.\
+
+
+
+Para isso temos um volume, que permite que montemos uma pasta dentro do nosso container e conforme vamos escrevendo nela ele vai escrevendo para um armazenamento em disco.
+
+Com o k8s tb é totalmente psossivel fazermos isso e escrevermos em disco na amazon, no azure, e tudo mais. Mas uma oiutra coisa muito interessante que faalaremos, é em relaçáo a volumes persistentes.
+
+Quando trabalhamos com nuvem, temos algo chamado como pool de storage.
+
+Vamos imageniar que criuamos um pool de storage de 1TB e deixamos disponivel para o nosso cluster k8s.
+
+Entao quando quisermos subir uma apolicaçáo e criar um hd para guardar dados, podemos fazer uma Claim de 50GB para guardar um pouco de nossos dados, disponiblizando do 1TB, 50GB solicitado.
+
+Quando trabalhamos com volumes persistenmntes no k8s sempre teremos 2 opçoes:
+
+Uma parte estatica e uma parte dinamica.
+
+A parte estática é quando é criada um pool de storage para a aplicaçáo ou varios pools de storage e solicitamos uma parte desse storage e entao se disponibliza um determinado espaço. Essa é a forma mais utilizada quando se trabalha com onPremises.
+
+Quando trabalaha-se mais com nuvem, existe algo chamado de StorageClass. Ela é uma especifica;cao que faz com que se tengha um ndriver para que,m dinamcamente se consiga provisionar volumes, espaçoes em disco para uma determianda aplicaçáo.
+
+
+
+Vamos imageniar que agora temos uma StorageClass da AWS configurada no nosso k8s. Entao todas as vezes que eu precisar de um volume persistente, faremos uma Claim e, automaticamente a Claim vai chamar a StorageClass e a StorageClass vai disponibilizar o espaço que precisamos (BlockStorage na AWS) por exemplo. 
+
+Claim --> StorageClass --> Dsiponibilizar o espaço --> BlockStorage
+
+Entao, o modelo estático é quando já deixamos defindo um monte de blocos (pool de storage) definiddos e entao fazemos uma solicitaçáo. Ou temos uma opçáo de criarmos uma StorageClass e ela, para cada vcez que fizermos uma solicitaçáo, essa StorageClass fala com o driver/tipo de disco/ rede que esta configurado para disponibilizar aquele pedaço para nós. 
+
+Todas as vezes que o Wesley trabalhou com k8s em prod, uma vez que tb ele sempre utiliza serviços gerenciados, sempre foi atraves de StorageClass e nunca atraves de um formato estático.
+
+Como que criariamos um pool de volumes? Vamos criar para fins de testes.
+
+Crie um arquivo pv.yaml (persistent volume):
+
+````bash
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv1
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteOnce
+
+````
+
+
+
+Com isso, criamos um volume persistente , isto é, teremos um espaço de volume persistente disponiblizado., Depois criamso uma Claim para solicitar um pedaço do volume persistente.
+
+Se trabalhamos com StorageClass por padrao, nao precisamos disso pois o StorageClass vai gerar dinamicamente os pedaços de espaço que estamos pedindo. 
+
+Normalmente quando fazemos esse tipo de coisa, podemos acrescentar um epaço como local-device que vai pegar um espaço que está'disponiblizado no disco do nosso node para utilizar como volume persistente, por exemplo
+
+````yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv1
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-device
+````
+
+
+
+A grande questao nao eh essa, mas que temnos duas formas de trabalhar: estática onde o es[aço já'está criado e definido (apenas requisitamos um espaço para a nossa aplicaçáo) e a dinamica que consiste em um StoageClass que sabe como vai funcionar e tem as credenciais para obter o pedaço de espaço que precisamos ali para ele.
+
+
+
+Agora, o grande ponto é'o seguinte. De acord com o tipo de Storage que temos, temos o tipo de acesso (AccessMode). 
+
+Dentre os AccessModes, temos o ReadWriteOnce/Many/Only. Qual a diferença entre todos eles?
+
+O acesso a disco é algo extremamente copmplexo.
+
+Imaginemos que temos 3 Pods acessando um disco de 50GB dentro de um Node1. Por enquanto nao há'nenhum problema para leitrura e etc.
+
+O grande problema é que se tivermos o Pod3 no Node2, teriamos que ser aptos a gravar em um Volume em um Node a partir de um Volume que está em outro Node! Como sabemos que o arquivo que vamos querer gravar nao está sendo usado? Teremos que dar um lock nesse arquivo? Fica dficil.
+
+
+
+O tipo de acesso mais comum de ser utilizado é o ReadWriteOnde, que significa que podemos gravar, ler, desde que estejam,os dentro do mesmo Node. Entao os Pods que estao dentro do mesmo Node do Volume podem ler e Gravar dentro desse mesmo Node. 
+
+Existem alguns formatos de storage que permitem que psosamos ler e gravar em diferentes Nodes acessando. Mas sao outros sistemas de arquivos. 
+
+Existe uma tabela no site do k8s que explica para cada Volume Pluginm, o tipo de acesso que podemos ter:
+
+https://kubernetes.io/docs/concepts/storage/persistent-volumes/
+
+
+
+Se algum dos plugins permitirem todos os tipos, a performance cai bastante pois tem que ter lock e um monte de outros tipos de controle.
+
+E por isso o ReadWriteOnce é o mais comum de acontecer.
+
+
+
+Portanto aqui temos duas opçoes: Criar antecipadamente o volume que queremos para o cluster e conforme os Pods vao subindo eles vao solicitando  esses volumes que devem ser disponiblizados.
+
+Na maioria das vexes, vamos criar um Persistent Volume Claim.
+
+No proximo topico, saberemos qual storageClass é criada por padrao no kind/k3d  e como muda de acordo com o clud provider e faremos alguns exemplos.
+
+
+
+### Criando Volumes persistentes e montando
+
+Vamos executar o seguinte comando:
+
+````bash
+❯ kubectl get storageclass
+NAME                   PROVISIONER             RECLAIMPOLICY   VOLUMEBINDINGMODE      ALLOWVOLUMEEXPANSION   AGE
+local-path (default)   rancher.io/local-path   Delete          WaitForFirstConsumer   false                  118d
+````
+
+Com esse comando vemos que o storageClass padrao aqui é o rancher.io/local-path. Esse local-path provalemente pega um pedaço em disco e disponibliza para que isso vire um volume persistente no k8s.
+
+O garnde ponto é que isso sempre muda de provedor para provedor. Na digital ocean, por exemplo, o provedor é um do-block-storage.
+
+Isso significa que todas as vezes que fizermos uma Claim, esse provedor vai ser chamado e muito provavelemente ele tem uma interface com o armazenamento da Digital Ocean que deve gerar um disco lá'dentro.
+
+No kind ou k3d, est;a gerando um local. Mas na nuvem, vai ser gerado um novo volume dentro de cada Nuvem.
+
+Como consegfuimos fazer testes e entao verificar os volumes que estao rodando? Vamos duplicar o squivo de pv.yaml que fizemos anteriormente e chamá-lo de pvc (persistent volime claim), que faremos a solicitaçáo de que precisamos de um determinado volume!
+
+pvc.yaml
+
+````yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: goserver-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+````
+
+
+
+Com isso, dizemos ao k8s que estamos solicitando (fazendo uma Claim) de um volume persistente cujo nome é goserver-pvc que possui um AccessMode de ReadWriteOnce em que solicitaremos 5GB de recurso para ele.
+
+Vamos aplicar esse arquivo:
+
+````bash
+❯ kubectl apply -f k8s/pvc.yaml 
+persistentvolumeclaim/goserver-pvc created
+````
+
+Pronto! Criamos. Vamos verificar:
+
+````bash
+NAME           STATUS    VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+goserver-pvc   Pending                                      local-path     58s
+````
+
+
+
+Vemos que a nossa goserver-pvc está'pendente e foi criada! Nesse momento ela está'pendente pq ainda nao foi realizada uma conexao. 
+
+Vamos ver:
+
+````bash
+❯ kubectl get storageclass
+NAME                   PROVISIONER             RECLAIMPOLICY   VOLUMEBINDINGMODE      ALLOWVOLUMEEXPANSION   AGE
+local-path (default)   rancher.io/local-path   Delete          WaitForFirstConsumer   false                  118d
+````
+
+
+
+No comando acima podemos ver que o VolumeBindingMode está'com um estado de WaitForConsumer. Entao ao invés de ele já sair liberando e esperando, ele espera receber o bind para fazer a liberaçáo para nós.
+
+Para fazer o bind devemos montar entao o nosso volume. 
+
+Vamos no nosso arquivo de deployment.yaml e na parte de volumes, vamos colocar goserver-volume (aqui poderia ser qualquer outro nome). Em pesistentVolumeClaim -> ClaimName deve ser o goserver-pvc
+
+Entao, aqui estamos criando um volume goserver-pvc que utiliza um persistentVolumeClaim que tem o nom de goserver-pvc . 
+
+Além disso, é necessário ainda escrever em volumeMounts o mountPath correspondente
+
+Logo, montaremos o goserver-volume no endereço "/go/pvc" e quando chamarmos o goserver-volume, ele vai chamas o clume to persistent volume claim goserver-pvc que acabamos por criar.
+
+````yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: goserver
+  labels:
+    app: goserver
+spec:
+  selector:
+    matchLabels:
+      app: goserver
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: "goserver"
+    spec:
+      containers:
+        - name: goserver
+          image: "rogeriocassares/hello-go:v9.7"
+
+          resources:
+            requests:
+              cpu: "0.05"
+              memory: 20Mi
+            limits:
+              cpu: "0.05"
+              memory: 25Mi
+
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 30
+            failureThreshold: 1
+            # initialDelaySeconds: 10
+
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 3
+            failureThreshold: 1
+            # initialDelaySeconds: 10
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 5
+            failureThreshold: 1
+            timeoutSeconds: 1
+            successThreshold: 1
+            # initialDelaySeconds: 15
+
+          envFrom:
+            - configMapRef:
+                name: goserver-env
+            - secretRef:
+                name: goserver-secret
+
+          volumeMounts:
+            - mountPath: "/go/myfamily"
+              name: config
+              readOnly: true
+            - mountPath: "/go/pvc"
+              name: goserver-volume
+
+      volumes:
+        - name: goserver-volume
+          persistentVolumeClaim:
+            claimName: goserver-pvc
+
+        - name: config
+          configMap:
+            name: configmap-family
+            items:
+              - key: members
+                path: "family.txt"
+
+````
+
+
+
+Vamos agora atualizar o nosso deployment
+
+````bash
+❯ kubectl apply -f k8s/deployment.yaml 
+deployment.apps/goserver configured
+````
+
+E agora, vamos ver como esta o nosso pvc:
+
+````bash
+❯ kubectl get pvc
+NAME           STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+goserver-pvc   Bound    pvc-d667b579-d412-48d2-be0e-d5dd83d54ad2   5Gi        RWO            local-path     18m
+````
+
+Vemos que o goserver-pvc esta como bound com um certo id com a capacidade de 5GB como ReadWriteOnce!
+
+Depois vamos discutir como faremos isso com aplicaçoes com Bando de Dados!
+
+Nessa aplicaçáo goserver, apesar de ela ser stateless, estamos criuando um volume para podermos guardar qualquer coisa.
+
+
+
+Agora, vamos pegar o nosso pod
+
+````bahs
+❯ kubectl get po
+NAME                        READY   STATUS    RESTARTS   AGE
+goserver-64695797bb-7rpg2   1/1     Running   0          3m47s
+````
+
+Vamos entrar nele e vemos que temos uma pasta denominada pvc!
+
+````bash
+❯ kubectl exec -it goserver-64695797bb-7rpg2 -- bash
+root@goserver-64695797bb-7rpg2:/go# ls
+bin  myfamily  pvc  server  server.go  src
+````
+
+Vamos entrar nessa pasta e criar um aquivo oi
+
+````bash
+root@goserver-64695797bb-7rpg2:/go# cd pvc/
+root@goserver-64695797bb-7rpg2:/go/pvc# touch oi
+root@goserver-64695797bb-7rpg2:/go/pvc# ls
+oi
+````
+
+Vamos sair do Pod e removê-lo. Se esse diretório pvc nao estivesse dentro de um volume persistente, iriamos perder o aqruivo que criamos. 
+
+````bash
+root@goserver-64695797bb-7rpg2:/go/pvc# ^C
+root@goserver-64695797bb-7rpg2:/go/pvc# exit
+command terminated with exit code 130
+
+❯ kubectl delete pod goserver-64695797bb-7rpg2
+pod "goserver-64695797bb-7rpg2" deleted
+````
+
+
+
+Mas montamos esse volume de forma persistente entao o arquivo oi deve estar contido da mesma maneira dentro do Pod que criamos!
+
+````bash
+❯ kubectl get po
+NAME                        READY   STATUS    RESTARTS   AGE
+goserver-64695797bb-8gqxd   0/1     Running   0          12s
+
+❯ kubectl exec -it goserver-64695797bb-8gqxd -- bash
+root@goserver-64695797bb-8gqxd:/go# cat pvc/oi 
+root@goserver-64695797bb-8gqxd:/go#
+````
+
+E lá está! Isso aconteceu pq estamos trabalhando com volumes no k8s! Entao se estamos trabalhando com uma aplicaçáo no k8s e essa aplicaçao nao pode perder inform,açoes em hipotese alguma, podemos criar um volume e mandar os dados serem guardados ali.
+
+Lembrando que o AccessMode ''e de ReadWriteOnce. Isso significa que outros Pods que estiverem em outro Node nao conseguirao acessar necessariamente esse volume aqui!
+
+
+
+### Entendendo Stateteless vs Stateful
+
+Temos dois tipos basicos de aplica'coes: stateless e stateful
+
+O grande ponto eh que as aplica'coes stateless nao precisa guardar estado ou informa'cao. Ela simplesmente recebe uma chamada, ela processa, consulta um banco de dados, uma api, retorna uma resposta e acabou.
+
+Já uma aplicaçao stateful ela precisa manter estado e o dado. Se ela nao fizer isso nao tem como ela funcionar. A forma mais facil de entender uma aplicaçao stateful eh pensando em um banco de dados, por exemplo.
+
+Agora, essa aplicaçáo deve ter um disco em nossa aplicaçáo. Entao tudo o que acontece no bancoi de ddados está conectado a um dusco.
+
+Isso significa que se a aplicaçáo morrer, os dados nao serao perfifos pois estarao gravados em disco. e nisso podemos fazer exatamente como fizemos no exemplo anterior, Criamos um disco persistente, atachamos no deployment do MySQL e fiamos felizes.
+
+Mas as vezes o MySQL nao funciona mais sozinho pois temos Nodes Slvaes do MYQL como em um cluster!
+
+No final das contas, nessa topologia, todos vao gravar no Master e ler nos MySQL slaves.
+
+Supondo que cada instancia do MYSQL seja um Pod, como sabemos qual será o Master/Slave? E o processo de carregamento? Primeiro o Master carrega e depois o Slvae. E depois que o Slave subiu ele vai carregar os dados do disco do master para sincronizar. E ai quando o Slave 1 estiver pronto o Slave 2 sobe e copia os dados do Slcvae 1 para todos os dados agora estarem sincronizados. Tudo isso é Pod!
+
+Quando trabalhamos com deployment, temos uma regra NOME_DEPLOYMENT-NOME_REPLICA_SET-RANDOM.
+
+eNTAO SE MANDARMOS SUBIR 3 REPLICAS DESSE POD, TODOS VAO SUBIR AO MESMO TEMPO. QUAL SERÁ'O MASTER E COMO SUBIREMOS UM DE CADA VEZ E SINCRONIZAMOS EM QUEM EH O MASTER? ESSE É UM GRANDE PROBLEMA!
+
+Por isso, quando famos de uma aplicaçao stateful, precisamos que ela suba de forma ordenada. Nao da para fazermos isso com Pods! E o processo de downsizing é'pior ainda! Vamos ter que matar Pods. E se for o master?
+
+
+
+Entao precisamos de um mecanismo que nos ajude nesse tipo de processo. Que façá essa escala horizontal mas que o faça baseado em determinada ordem!
+
+Precisamos tambem de um mecanismo que quando desescalamos, removedo nodes, seja como uma pilha, de tras para frente.
+
+Os nomes randomicos que o k8s gera para a gente nao funciona mais.
+
+Por isso vamos trabalhar com statefulksets.
+
+O Statefulsets é um objeto do k8s muito parecido com o deployment mas que ele tem essas nuancias que vaoi nos ajudar a criar os pods em determinadas areas, Nao serao mais randomicos mas seguirao um determinada ordem para conseguirmos trabalhar etc.
+
+
+
+### Criando Statefulset
+
+Vamos criar um arquivo chamado statefulset.yaml que subirá um mysql. Vamos fazer um teste e escrever, primeiramente a estrutura como um Deplyment:
+
+````yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql
+    
+````
+
+E vamos aplicá-lo
+
+````bash
+❯ kubectl apply -f k8s/statefulset.yaml 
+deployment.apps/mysql created
+````
+
+E vamos ver os Pods criados
+
+````bash
+❯ kubectl get po
+NAME                        READY   STATUS              RESTARTS       AGE
+goserver-64695797bb-8gqxd   1/1     Running             1 (116m ago)   17h
+mysql-94c4ddd88-rqc8s       0/1     ContainerCreating   0              36s
+mysql-94c4ddd88-8pz2k       0/1     ContainerCreating   0              36s
+mysql-94c4ddd88-wdpxt       0/1     ContainerCreating   0              36s
+
+````
+
+Ainda nao deu certo pq faltam passar as variaveis de ambiente.
+
+````bash
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              value: root
+````
+
+Aplicando o aquivo ao k8s novamente:
+
+````bash
+❯ kubectl get po
+NAME                        READY   STATUS    RESTARTS       AGE
+goserver-64695797bb-8gqxd   1/1     Running   1 (121m ago)   17h
+mysql-59f7587fc-mmd8f       1/1     Running   0              9s
+mysql-59f7587fc-wtj8k       1/1     Running   0              7s
+mysql-59f7587fc-xxxwm       1/1     Running   0              4s
+````
+
+Agora temos 3 containers/Pods rodando nosso Mysql. Qual deles seria o master? Nao conseguimos garantir a ordem e isso nos atrapalha muito!
+
+Vamos deletar o deploy mysql que criamos!
+
+````bash
+❯ kubectl delete deploy mysql
+deployment.apps "mysql" deleted
+````
+
+E mudar o tipo do yaml para StatefulSet. Todas as vezes que formos subir um StatefulSet precisamos tb colocar um serviceName. E todas as vezes que formos trabalhar com statefulSets vamos trabalhar com algo como headless service.
+
+````yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+spec:
+  serviceName: mysql-h
+  replicas: 3
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              value: root
+````
+
+Vamos colocá-lo para rodar:
+
+````bash
+❯ kubectl apply -f k8s/statefulset.yaml 
+statefulset.apps/mysql created
+````
+
+Pronto! Agora criamos um statedfulset e vamos ver o que esrta acontecendo.
+
+````bash
+❯ kubectl get po
+NAME                        READY   STATUS    RESTARTS       AGE
+goserver-64695797bb-8gqxd   1/1     Running   1 (152m ago)   18h
+mysql-0                     1/1     Running   0              2m1s
+mysql-1                     1/1     Running   0              20s
+mysql-2                     1/1     Running   0              18s
+````
+
+
+
+Olha que legal! A partir de agora o statefulset já tem uma ordem para criaçao e nao eh mais randomico! Se quisermos entao criar, já é diferente, e se colocarmos para 8 replicas, ele vai criar em sequencia, um por vez e garante a nós a ordem de criaçao dos Pods! Isso é'muito importante pois precisamos ter nocao dessa ordem de criaçao quando estamos trabalhando com StatefulSet! E caso desejemos diminuir o numero de Pods, o proprio k8s vai começar a deletar os statefulsets Pods de tras para frente pq ele precisa dessa ordem sendo trabalhada e respeitada!
+
+O mais interessante de tudo isso é'que como esses Pods sao statefuls, eles tem a orem de criaçao e de saida, temos que definir um DNS name para ele, que nesse caso chamamos de mysql-h que na verdade é um headless service que vai nos ajudar durante todo esse processo.
+
+
+
+Caso desejassemos que a criaçao dos Statefulsets nao precisasse seguir uma sequencia de criaçáo e pudesse ser criada de forma paralela, basta adicionarmos a tag podManagementPolicy como parallel. Vamos testar isso com 8 replicas conforme o aquivo abaixo.
+
+````yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+spec:
+  serviceName: mysql-h
+  podManagementPolicy: Parallel
+  replicas: 8
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              value: root
+````
+
+
+
+Deletando o StatefulS e aplicando novamente o arquivo no nosso cluster
+
+````bash
+❯ kubectl delete statefulset mysql
+statefulset.apps "mysql" deleted
+
+❯ kubectl apply -f k8s/statefulset.yaml 
+statefulset.apps/mysql created
+````
+
+
+
+Verificando os Pods:
+
+````bash
+❯ kubectl get po
+NAME                        READY   STATUS              RESTARTS       AGE
+goserver-64695797bb-8gqxd   1/1     Running             1 (165m ago)   18h
+mysql-0                     0/1     ContainerCreating   0              53s
+mysql-1                     0/1     ContainerCreating   0              53s
+mysql-2                     0/1     ContainerCreating   0              53s
+mysql-3                     0/1     ContainerCreating   0              53s
+mysql-4                     0/1     ContainerCreating   0              53s
+mysql-5                     0/1     ContainerCreating   0              53s
+mysql-6                     0/1     ContainerCreating   0              53s
+mysql-7                     0/1     ContainerCreating   0              53s
+````
+
+Podemos escalar os Pods tb via linha de comando!
+
+````bash
+❯ kubectl scale statefulset mysql --replicas=5
+statefulset.apps/mysql scaled
+````
+
+Agora ele cria tudo em paralelo e nao fica esperando criar um ou outro. 
+
+Nisso podemos controlar tb esse tipo de comportamento, apesar de que, na maioria das vezes, é'desejavel criar um após o outro!
+
+````
+❯ kubectl get po
+NAME                        READY   STATUS    RESTARTS       AGE
+goserver-64695797bb-8gqxd   1/1     Running   1 (169m ago)   18h
+mysql-0                     1/1     Running   0              4m1s
+mysql-3                     1/1     Running   0              4m1s
+mysql-2                     1/1     Running   0              4m1s
+mysql-4                     1/1     Running   0              4m1s
+mysql-1                     1/1     Running   0              4m1s
+````
+
+
+
+### Criando headless serviceþ
+
+
+
+Dentre os Pods que criamos do MYSQL, apenas o Pod Master vai realizar a grvaçáo no banco de dados. Os outros devem sewr de leitura. O problema é'que sabemos que quando estamos trabalhando com k8s e colocamos um Service no meio, o Servicxe e faz o load balancer. Imaginemmos que seja criado o MySQL Service. Todos que enviarem uma requisiçáo para o MySQL Service serao apontados para os Pods, mas apenas um deles pode escrever! Nesse caso, se quisessemos gravar precisariamos enviar oara o master e para leitura, apenas para os slaves.
+
+
+
+Com isso, é'interessante que cada Pod tenha o seu respectivo Service. Entao gravaris no MySQL-0 e leriamos no MySQL-1 para frente.
+
+Para fazermos isso, devemos utilizar o headless service. Ele basicamente é um servi;co que é'criado e forçámos ele a nao ter um IP interno dentro da aplica;cao e ele basicamente eh apenas um apontamento de DNS.
+
+Isso significa que qiando criamos um headless service mandando MySQL Service master, ele apponta para o Service Master. Caso apontarmos para Mysql-h (headless) slave 1, ele vai apontar para o Slave 1. Nao tem um IP feito nele. Ele simplesmente é'um apontamento de DNS que o k8s faz internamente. Precisamos fazer isso para termos a possibilidade de escolher para qual Pod precisamos ir pq sabemos que cada Pod tem uma funçao diferente dentro do nosso processp pq eles sao StatefulSet! 
+
+Portanto, ao invés de termos uma barreira (SERVICE) que ficaria balanceando essa carga, teremos no final um service para o master e um service para cada Node MySQL slave como apenas um apontamento via DNS, isto é, um headless service!
+
+Vamos duplicar o arquivo de service.yaml e renomear para mysql-service-h.yaml (headless)
+
+````bash
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-h
+spec:
+  selector:
+    app: mysql
+  ports:
+    - port: 3306
+  clusterIP: None
+````
+
+Quando colocamos o clusterIP como None, o service sabe que nao vai trabalhar com IP para fazer as relaçoes, mas vai trabalhar com o DNS. Nesse ponto ele vai fal;ar: Como eu sei etao quais sao todos os Pods necessários para criar esse tipo de Headless Service? Ele vai fazer isso atraves do Service Name!
+
+No arquivo de configurtaçao do StatefulSet, foi criado um serviceName! Entao esse serviceName do statefulSet deve ser identico ao nome do nosso serviço descrito em mysql-service-h.yaml
+
+Logo, esse serviço vai resolver tudo o que precisamos via DNS, independente da quantidade de replicas que formos tendo. 
+
+
+
+Lembrando: O serviceName do statefulSet tem que bater com o serviceName do service que estamos criando para ele. E o clusterIP tem que ser None. Baseado nisso, vamos conseguir o tao sonhado headless service!
+
+Vamos deletar o statefulset do Mysql
+
+````bash
+❯ kubectl delete statefulset mysql
+\statefulset.apps "mysql" deleted
+````
+
+E agora vamos apluicar o statefulset com algumas replicas 
+
+````yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+spec:
+  replicas: 4
+  serviceName: mysql-h
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              value: root
+````
+
+E aplicamos o novo arquivo 
+
+````bash
+❯ kubectl apply -f k8s/statefulset.yaml 
+statefulset.apps/mysql created
+````
+
+E agora vcamos criar o nosso service headless
+
+````bash
+❯ kubectl apply -f k8s/mysql-service-h.yaml
+service/mysql created
+````
+
+
+
+Pronto! Vamos ver na pratica o que isso esta acontecendo!
+
+````bash
+❯ kubectl get po                        
+NAME                        READY   STATUS    RESTARTS        AGE
+goserver-64695797bb-8gqxd   1/1     Running   4 (4h39m ago)   47h
+mysql-0                     1/1     Running   0               5m9s
+mysql-1                     1/1     Running   0               5m9s
+mysql-2                     1/1     Running   0               5m9s
+mysql-3                     1/1     Running   0               5m9s
+
+````
+
+Nesse caso temos o mysql-0 como o master. Entao se alguem quiser escrever alguma coisa deve se conectar no mysql-0 via DNS. 
+
+Ao executarmos o comando de verificar os serviços, percebemos que temos o nosso mysql-h com CluserIp e batendo na porta 3306 na porta external.
+
+````bash
+❯ kubectl get svc                       
+NAME               TYPE           CLUSTER-IP      EXTERNAL-IP    PORT(S)          AGE
+kubernetes         ClusterIP      10.43.0.1       <none>         443/TCP          120d
+goserver-service   LoadBalancer   10.43.203.126   192.168.96.2   8080:30210/TCP   119d
+mysql-h            ClusterIP      None            <none>         3306/TCP         110s
+````
+
+
+
+Uma vez que criamos esses statefulsets e eles estao sendo criados e o serviceName 'e o mysql-h, o matchlabesls ;e o app: mysql do statefulset que linka com o app: mysql do mysql-service-h.yaml, pors etc. Agora precisamos que quando vamos trabalhar com o service, ele gere inclusive o service de outros camaradas, eventualmente.
+
+Basicamente, o que acontece agora 'e o seguinte: Todas as vezes em que precisarmos chamar o noisso Master ou qualquer coisa desse tipo, faremos o seguinte.
+
+
+
+Vamos entrar dentro de um Pos para ficar mais facil e dar um ping no dns do servi'co que criamos!
+
+ ````bash
+ ❯ kubectl exec -it goserver-64695797bb-8gqxd -- bash
+ root@goserver-64695797bb-8gqxd:/go# ping mysql-h
+ PING mysql-h.default.svc.cluster.local (10.42.0.184) 56(84) bytes of data.
+ 64 bytes from mysql-1.mysql-h.default.svc.cluster.local (10.42.0.184): icmp_seq=1 ttl=64 time=0.137 ms
+ 64 bytes from mysql-1.mysql-h.default.svc.cluster.local (10.42.0.184): icmp_seq=2 ttl=64 time=0.059 ms
+ 64 bytes from mysql-1.mysql-h.default.svc.cluster.local (10.42.0.184): icmp_seq=3 ttl=64 time=0.055 ms
+ ````
+
+OLha só! Ele está caindo em mysql-1! Vamos ver agora para colocarmos no mysql-0.
+
+````bash
+root@goserver-64695797bb-8gqxd:/go# ping mysql-0.mysql-h
+PING mysql-0.mysql-h.default.svc.cluster.local (10.42.0.183) 56(84) bytes of data.
+64 bytes from mysql-0.mysql-h.default.svc.cluster.local (10.42.0.183): icmp_seq=1 ttl=64 time=0.158 ms
+64 bytes from mysql-0.mysql-h.default.svc.cluster.local (10.42.0.183): icmp_seq=2 ttl=64 time=0.055 ms
+64 bytes from mysql-0.mysql-h.default.svc.cluster.local (10.42.0.183): icmp_seq=3 ttl=64 time=0.060 ms
+````
+
+O que aconteceu aqui foi que, através desse serviço, baseado no nome, chamar o Pod quie queremos e isso é'o mais importante!
+
+Entao com esse headless service, basta colcoarmos o nome do Pod que queremos chamar na frente ponto mysql-h e ele vi conseguir nos redirecionar exatamente para o Pod que estavamos querendo chegar!
+
+Isso é incrivel pq basicamente estamos realizando apontamentos dinamicos de DNS sem a necessidade de termos algo por IP!
+
+Agora para cada POD conseguimos chamar baseado nessa convençáo!
+
+NOME_DO_POD.NOME_DO_SVC.NAMESPACE.svc.cluster.local
+
+Logicamente o k8s deixa passarmos uma resoluçáo mais simples, a nao ser que tenhamos um outro namepace e entao temos que passar toda essa resoluçáo. 
+
+Com isso, o k8s estabelece que se precisarmos falar com o master é mysql-0. Acima disso, sabemos que vamos conseguir falar com os outros Pods.
+
+Essa ideia de conseguirmos trabalhar com statefulset e headless service sempre vai nos ajudar bastante.
+
+O grande segredo mesmo é que o nome do servico em mysql-service-h, por exemplo, seja o mesmo nome do serviceName que está setado no statefulSet.yaml.
+
+
+
+### Criando Volumes Dinamicamente com StatefulSet
+
+Agora, o grande ponto é quie o nosso banco de dados vai precisar gravar os dados no banco. Vamos precisar de um volume persistente para que os dados fiquei guardados caso o Pod venha a morrer.
+
+Entao aprendemos que podemos criar um PrsistentVolumeClaim, que entao vai gerar um volume e ele vaqi dar um bind com o nosso Pod e vai ficar tudo feliz. 
+
+O grande ponto eh quem em alguns casos vamos querer criar um bamnco de dados por réplica. P;or exemplo, tem 4 mysql e além da aplicaçáo mysql vamos querer criar 5 voluimes persistentes para guardarmos os dados do nosso mysql. E isso nao vamos querer fazer manualmente pq quando formos querer escalar na mai nao vamos querer dizer com é um persistent volume claim que qeueremos fazer.
+
+E se tivesse uma forma que todas as vezes que estivermos trabalhando com o Statefulset e quisermos aumentar a quantidade de replicas, automaticamewnte ele gera um novo volume persistente automaticamewnte?
+
+
+
+Sim! Entao, ao invés de trabaltarmos no pv.yaml, basicamente o que faremos é um pedaço do template de pv,yaml dentro do template de statefulset.yaml.
+
+E entao todas as vezes que criarmos uma nova réplica, novos olumes serao criados e atachados na nossa aplicação.
+
+
+
+Basicamente, agora vamos criar uma área chamada volumeClaimTemplate no arquivo statefulset para ser utilizado todas as vezes que quisermos escalar uma nova replica nossa. E dentro da spec do container do mysql camos colocar o volumeMOunths com o caminho do lugar ondeos arquivos do mysql  que criamos ficam gravados e em name vamos colocar o nome do volume que colocamos no template.
+
+Nesse momento entao queremos dizer que a todo o momento que criamos uma nova replica ele vai automaticamente criar uma claim para chamar um volume e vai atachar automaticamente esse volume para esse nosso detrerminado POd!
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+spec:
+  replicas: 4
+  serviceName: mysql-h
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              value: root
+          volumeMounts:
+            - mountPath: /var/lib/mysql
+              name: mysql-volume
+
+  volumeClaimTemplates:
+  - metadata:
+      name: mysql-volume
+    spec: 
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 5Gi
+
+```
+
+
+
+Vamos colcoarpara funcionar desde o começo
+
+```bash
+❯ kubectl delete statefulset mysql
+statefulset.apps "mysql" deleted
+
+❯ kubectl apply -f k8s/statefulset.yaml
+statefulset.apps/mysql created
+```
+
+Podemosver aqui que os Pods foram criados.
+
+```bash
+❯ kubectl get po
+NAME                        READY   STATUS    RESTARTS      AGE
+goserver-64695797bb-8gqxd   1/1     Running   5 (26h ago)   3d3h
+mysql-0                     1/1     Running   0             55m
+mysql-1                     1/1     Running   0             55m
+mysql-2                     1/1     Running   0             55m
+mysql-3                     1/1     Running   0             55m
+```
+
+
+
+Mas como entao saberemos que o nosso volume foi criado? Nesse caso, vamos fazer o seguinte:
+
+```bash
+❯ kubectl get pvc
+NAME                   STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+goserver-pvc           Bound    pvc-d667b579-d412-48d2-be0e-d5dd83d54ad2   5Gi        RWO            local-path     3d4h
+mysql-volume-mysql-0   Bound    pvc-e40122d4-6fc3-4b28-acbe-c6ffcfb6e709   5Gi        RWO            local-path     57m
+mysql-volume-mysql-1   Bound    pvc-dd85f32c-3791-4390-aba5-201912e75a7b   5Gi        RWO            local-path     56m
+mysql-volume-mysql-2   Bound    pvc-005d8aff-d672-43db-8836-9aecc6b95a3b   5Gi        RWO            local-path     56m
+mysql-volume-mysql-3   Bound    pvc-25c8cd32-590e-4b10-9b32-f32268d79ea0   5Gi        RWO            local-path     56m
+```
+
+O que temos acima sao os volumes que criamos baseados no mysql.
+
+Nesse caso, ele criou um volume para cada Pod!
+
+Agora vamos imaginar o seguinte. Que por algum motivo o Pod mysql-1 ẽ deletado. Oque acontece a partirde agora é que o Scheduler do k8s vai perceber que um pod nao mais existe e ele vai criar um outro e esse Volume 1 vai ser reatachado. O que aconteceu é que o volume nao foi apagado pois esta separado do POd!
+
+Com isso conseguimos trabalhar de forma muito eficiente trabalhando com o statefulset.
+
+POrtanto, basicamente conseguimos criar replicas de forma ordenada, matar service de forma ordenada, criar headless service para fazer a requisicao cai no serviço que desejamos e criartemplatesde volumes que a cada POd que eh criado ele gera um volume que atacha nesse emplate. E se caso viermos a atar um determinado POd o volume nao vai ser removido, mas assim que ele for recreiado ele reatacha no nosso volume!
+
+Temos agora uma aplicaçcao mais que completa para trabalharcom aplicaçoes que precisam guardar dados, trabalhar com volumes persistentes, que precisam ter ordem de criacao e remçcao, contar com indice de identificaçao etc.
+
+
+
+### Devo usarmeu banco de dados no kubernetes
+
+A grabde pergunta ẽ se devemos guardar nosso db dentro k8s. Eh seguro?Eh rapido? O que devemos fazer?
+
+Em relaçcao a parte de estrutura, o k8s tem diversos recursos para nos ajudar durante todo esse processo. 
+
+O grande ponto eh que quando temos o nosso projeto pode ser interessante deixar o banco de dados fora do k8s.
+
+Isso posto pois as aplicações ainda nao estao maduras o suficientes para serem escaladas ou para o limitese metricas! Banco de dados é algo muito complexo, principalmente se estamos ridando aplicações muito criticas!
+
+Se temos um sistema simples e nao temos muita dor de cabeça, nao ha problema nenhum em colcoar dentro do k8s. Mas em uma aplicação critica, o banco de dados eh uma aplicaçcao tao tunavel e tao paralelo que o wesley tende a deixar o banco de dados fora do kubernetes.
+
+A estrutura que ele trabalha hoje ele tem mysql postgres elasticsearch  e todos esses bancos de dados nao ficam dentro do seus cluster k8s. 
+
+Ele usaserviços gerenciados pra ter paz pos sabe que esses serviços vao conseguir gerenciar melhor do que gerenciariamos no k8s por nao sermos especialistas. Podemos escolher um Amazon RDS ou GOgleCLoud Databases onde gerencia odbe tem zonas de disponibilidades, backups e etc. Ẽ algo tao critico que ele prefere deixar fora do k8s. Ele conhece pessoas que deixam dentro do k8s e esta tudo ok, ja trabalhou com db no k8s e nao teve problemas e etc. Mas ha uma recomendaçao pessoal principalmente se for um serviço muito critico. 
+
+Isso nao significaque possamos ter um wordpress no nosso k8s em que deixamos o banco de dados rodando no k8s e tb o upload de arquivos com voumes persistens para o wp-content para colocarmos ali por exemplo.
+
+Isso pq pode ser muito critico para misturar no k8s. Ẽ importante pensar nisso!
+
+É sempreimportante tb nas clouds garantirmos que se esta fazendo um correo backup!
+
+
+
+## Ingress
+
+### VIsao Geral
+
+Vimos que temos um tipo de service que o o LoadBalancer.Nesse serviço, especificamente geraumIP externo quando estamos rodando serviços gerenviaveis do k8s comoo GKE (Google)  o EKS (AWS) e o AKS (Azure). 
+
+Agora vamos imaginar que estamos em uma arquitetura rodando microserviços e naquela arquietura temos 10 micrseriços para funcionar com acesso a Web. 
+
+Intuitivamente colocariamos esses microsserviços para funionarem como LoadBalancer, vamos pegar o IP de cada um, confihurar o DNS e sermosfelizes.
+
+Mas normalmente quando fazemos isso, ele vai gerar na nuvem um LOad Balancer e gerar um IP e isso tem custo! É aqula qhistoria que nao tem tanto sentido termos tantos LOaBalancers por serviço.
+
+E é por conta disso que o k8s tem um serviço muito interessante que se chama Ingress, OINgress acaba sendo como o ponto unico de entrada na nossa aplicaao. Assim configuramos o Ingress e ele ẽ um Service LOadBalancer que vai ter um IP.
+
+Vamos imaginar que tenhamos  10 serviços ali. ENtao todas as vezes que quisermos acessar qualquer um desses seriços vamos bater no IP do ingress. E ai baseado no hostname e no Path que a pessoa estã acessando, configuramos para que quando acesso via alguma URL vai para tal serviço ou .admin, manda para o serviço do adim; catalogo, manda para o serviço do caalogo ; busca.algumacoisa, manda para o microsserviço de busca. 
+
+Portanto, o ingress acaba sendo o ponto unico de entrada e ele faz o roteamente nos serviços que queremos. Nesse caso ele acaba por lembrar uma API Gtaeway, que faz o roteamento das coisas tb. ELe tb lemra muito um Proxy reverso que pega a requisiçcao e roteia para onde quisermos.
+
+N realizadade a grande sacada de se trabalhar como Ingress no k8s, ẽ que existe um contolador que ẽ o Ingress COntroler do nginx!
+
+Entao podemos ter um nginx por baixo dos planos e ele vai receber as requisiçoese fazer os apontamentos (isso ẽ tranasparente quando usamos esse controlador do k8s).
+
+Nesse capitulo vaos apredercomo instalar, como configurar e como fazemos isso do zero até configurarmos o DNSao vivo para conseguirmos colocarmos no ar!
+
+
+
+### COnfigurando Aplicaçao no GKE
+
+Primeiramente, vamos acessar o google compite plataform (GCP) e criar um cluster k8s com apenas uma maquina.
+
+Acesse https://console.cloud.google.com/ e faça o login.
+
+Clique em acessar o console e crie um projeto fullcycle-examples;
+
+Depois vá em Kubernetes Engine e crie umcluster.
+
+]AQUI EU NAO SEGUI EM DIANTE PARA NAO TER QUE GERAR CUSTOS]
+
+Com a linha d comando instalada (gcloud), exevute o seguinte comando 
+
+```bash
+gcloud container clusters get-credentials cusros-fullcycle --zone us-central1-c --project fullcycle-examles
+```
+
+Com isso, o setup das credenciais foi realizado automaticamente.
+
+Com o comando abaixo:
+
+```bash
+kubectl get nodes
+```
+
+Teremos o resultado dos Node queforam criados no GCP!
+
+Nesse momento, a nossa mãquina estã atachada com o k8s do Google e nao mais do local.
+
+Agora, vamos imaginar que estamos em nossa mãquina e queremos fazero deploy para um CLoud Provider. Ou estamos em um CLoud Provider e desejamos fazer um deploy para outro CLoud Provider.
+
+Basta entao aplicarmos o diretorio onde estao localizados todos os nossos arquivos de manifest (yaml).
+
+```bash
+kubectl apply -f k8s/
+```
+
+E incrivelmente o kubectl vai aplicar todos os arquivos AUTOMATICAMENTE!!!
+
+Aunicaque ee nao reconheceu foi a do kind, que foi feita para o server local mesmo. 
+
+Equando dermos 
+
+```bash
+kubectl get po
+```
+
+Devemos ver todos os nossos POds sendo criados jã na nuvem!!! QUe incrivel isso!
+
+Com apenasum comando jã está tudo la no ar!
+
+Outra cosia que vamos precisar fazer tb é verificar os services. 
+
+```bash
+kubectl het svc
+```
+
+E podemos notar que pela primeira vez o EXTERNAL IP apareceu! Isso pq o serviço do goserver ẽ loadbalancer. Se tivessemos mais serviços, cada serviço iria gerar um External Ip e teriamos que pagar por cada um deles!
+
+Se formos no nosso navegador e acessarmos esse External IP vemos que estã tudo funcionado apenas ridando os maifestos do k8s!
+
+
+
+### Instalando o Ingress Nginx Controller
+
+Existem diversosformasde trabalharmos com o Ingress e vamosutilizaro IngressNginx. Para fazer ainstalação existem diversas formas, mas vamos trabalhar agora com o Helm. 
+
+Vamos digitar no GOogle  ingress nginx helm chart;
+
+https://kubernetes.github.io/ingress-nginx/deploy/
+
+Aqui vemos que podemos realizar a instalaçao de diversas maneiras, incluisive usando o KE (Google). 
+
+Entao, o quepodemos fazer ẽescolher o nosso Cloud Provider e seguir o processo de instalação. A outra opçcao ehusando Helm, Mas quando formos colcoar em produçao, é muiti importante que façamos a insalaçao de acordo com cada CLoud pq ele vai trabalhar com a partede permissao, vai fazer os attaches de arbach e etc.
+
+No nosso caos generico agora, vamos copiar a linha de instalaçao abaixo e colar. UMa coisa importante é que somente a versao 3 do helm eh permitida.
+
+Um ponto importante eh que quando damos um helm install nginx, perceba que estamos rodando isso e ele vai instalar em um namespace padrao. Namespaces no k8s sao espaços que acabamos separando aplicaçoes e contextos. Inclusive para cadanamespace conseguimos colocar regras de permissionamento, de recursos computacionais, de quais usuaros podem acessar, regras de service accounts que podem rodar. Etao isso eh um ponto importante. COmo estamos nesse exemplo, vamos rodar dessa forma, que ele vai instalar o igress-nginx no nosso namespace default. Mas na vida real isso normalmente eh separado em um namespace chamado ingress nginx, por exeplo.
+
+Vamos instalar o hlm para o ubuntu via apt
+
+```bash
+curl https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
+sudo apt-get install apt-transport-https --yes
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+sudo apt-get update
+sudo apt-get install helm
+```
+
+E entao
+
+```bash
+helm upgrade --install ingress-nginx ingress-nginx \
+  --repo https://kubernetes.github.io/ingress-nginx \
+  --namespace ingress-nginx --create-namespace
+  
+----
+
+Release "ingress-nginx" does not exist. Installing it now.
+NAME: ingress-nginx
+LAST DEPLOYED: Sat Nov 19 23:28:53 2022
+NAMESPACE: ingress-nginx
+STATUS: deployed
+REVISION: 1
+TEST SUITE: None
+NOTES:
+The ingress-nginx controller has been installed.
+It may take a few minutes for the LoadBalancer IP to be available.
+You can watch the status by running 'kubectl --namespace ingress-nginx get services -o wide -w ingress-nginx-controller'
+
+An example Ingress that makes use of the controller:
+  apiVersion: networking.k8s.io/v1
+  kind: Ingress
+  metadata:
+    name: example
+    namespace: foo
+  spec:
+    ingressClassName: nginx
+    rules:
+      - host: www.example.com
+        http:
+          paths:
+            - pathType: Prefix
+              backend:
+                service:
+                  name: exampleService
+                  port:
+                    number: 80
+              path: /
+    # This section is only required if TLS is to be enabled for the Ingress
+    tls:
+      - hosts:
+        - www.example.com
+        secretName: example-tls
+
+If TLS is enabled for the Ingress, a Secret containing the certificate and key must also be provided:
+
+  apiVersion: v1
+  kind: Secret
+  metadata:
+    name: example-tls
+    namespace: foo
+  data:
+    tls.crt: <base64 encoded cert>
+    tls.key: <base64 encoded key>
+  type: kubernetes.io/tls
+```
+
+
+
+Aõs a instalaçao / update, instalamos o ingress-mginx e tb eslesestã dando um template para nõs de como podemos criar um manifesto de Ingress com o host e tb com o TLS.
+
+COmo podemos ver se o nossoIngress COntroler esta rodando? Vamos ver com o comando abaixo
+
+```bash
+❯ kubectl get svc
+```
+
+Como no nosso caso nao estamos na nuvem, o Ingress COtroler parece estar pendente aguardando um IP externo.
+
+Ẽ no IP externo que devemos estar ligado. Todo mundo que for entrar pela nossa aplicação vaientrar pelo nosso IP externo ahora. Depois podemos atẽ mudar o service go goserver e tirar o external IP dele pq nao precisaremos do External IP mais pq usaremos apenas o External Ip do Ingress Controler.
+
+Entao uma vez que temos o ingress contoler instalado e rodando podemos ver o Pod responsavel pelo Ingress com o comando 
+
+```bash
+❯ kubectl get po 
+```
+
+Por isso que normalmente nõsseparamos por namespace pq nao tem muito sentido o Ingress ficar rdando no mesmo namespace que estao rodando as nossas aplicações. 
+
+Configurando INgress e DNS
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
