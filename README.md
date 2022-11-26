@@ -6606,67 +6606,972 @@ Entao uma vez que temos o ingress contoler instalado e rodando podemos ver o Pod
 
 Por isso que normalmente nõsseparamos por namespace pq nao tem muito sentido o Ingress ficar rdando no mesmo namespace que estao rodando as nossas aplicações. 
 
-Configurando INgress e DNS
+### Configurando Ingress e DNS
+
+Agora vamos criar um novo arquivo chamado Ingress.yaml. Nesse arquivo temos algumas annotations. Elas sao importantes porque cada sistema que for utilizar desse ingress pode pegar essas annotations e poder interpretar para utilizar alguma funcionalidade. No nosso caso, a nossa annotation vai informar que vamos utilizar o ingress do nginx.
+
+Vamos aplicar esse arquivo de ingress
+
+````bash
+❯ kubectl apply -f k8s/ingress.yaml                                                                
+error: resource mapping not found for name: "ingress-host" namespace: "" from "k8s/ingress.yaml": no matches for kind "Ingress" in version "networking.k8s.io/v1beta1"
+ensure CRDs are installed first
+````
+
+Como em nosos caso nao temos um IP externo por estarmos testanto em um server local, o Ingress dá'esse tipo de erro pois nao foi possivel configurar um Namespace para esse service
+
+ Uma vez que temos o ingress-host criado, ao chegar uma requisiçáo no dominio indicado, 
+
+Caso déssemos um
+
+````bash
+kubectl get svc
+````
+
+Deveriamos visualizar o ingress-nginx-controller service como LoadBalancer e IP externo.
+
+Com o IP copiado, colocaríamos ele no Gerenciamento de DNS e entao o IP externo estaria atachado no DNS. Ao colcoar o DNS no navegador, veriamos a aplicaçáo funcionando!
+
+Se colocassemos /admin no ingress.svc, e aplicarmos o arquivo no k8s, bastaria acessar o endereço no navegador com /admin!
+
+Aqui agora o mais importante é sabermos que poderiamos instancias vsrios prefixos e sufixos e urls e que cada um deles mandaria para um dos serviços do k8s e nao precisariamos mais do tipo de service do goserver-service como LoadBalancer, mas como ClusterIP e economizariamos uma grana. 
+
+Vamos fazer isso. 
+
+````yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: goserver-service
+spec:
+  selector:
+    app: goserver
+  type: ClusterIP
+  ports:
+  - name: goserver-service
+    port: 8080
+    targetPort: 8000
+    protocol: TCP
+
+````
+
+
+
+E aplicamos a nova configuraçáo de service
+
+````bash
+❯ kubectl apply -f k8s/service.yaml 
+service/goserver-service configured
+
+❯ kubectl get svc                  
+NAME               TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
+kubernetes         ClusterIP   10.43.0.1       <none>        443/TCP    103m
+mysql-h            ClusterIP   None            <none>        3306/TCP   101m
+goserver-service   ClusterIP   10.43.191.199   <none>        8080/TCP   101m
+
+````
+
+É possivel que de um erro ao atualizar se for realizada essa mudanáaca na Cloud. Basta deletar e aoplicá-lo novamente. 
+
+
+
+Nesse ponto, podemos ter agora quantos services quisermos e que vai rotear quando chegar nesse IP será o nosso service do Ingress com Load Balancer, que nos fornece um IP externo!
+
+
+
+## Cert Manager
+
+### Instalando o Cert Manager
+
+Existem 2 formas gerais para fazermos a instala';çao dos cerificados no k8s.  A priemira forma é o que o ingress sugere.
+
+Criamos um secret e passamos um crt do certificado. E ai a configuraçáo do TLS le o crt e a key e ai esta aplicado o nosso certificado. Se comprarmos im certificado normal, pgaamos ele, criamos o secret e colcoamos a configuraçáo basica ali. 
+
+
+
+Mas hoje em dia temos o Cert Manager do lets Encrypt que gera os certificados para nós automaticamente e gerencia o tempo de validaçáo e gera os novos certificados para nós de maneira automatica.
+
+Hohje em dia está sendo grandemente utilizado este método ao inves de ficar renovando e alterando servidor e tudo mais. Vamos ver como fazemos isso!
+
+
+
+Acessando a documentaçao disponivel em https://cert-manager.io/v1.1-docs/installation/kubernetes/ ele mostra como fazemos a instalaçáo. Mas a ideia principal é'que instalemos o manifesto. 
+
+Se tivermos usando o Google (GKE), ele vai pedir para rodarmos um comando para garantir que teremos permissao 
+
+````bash
+kubectl create clusterrolebinding cluster-admin-binding \
+    --clusterrole=cluster-admin \
+    --user=$(gcloud config get-value core/account)
+````
+
+
+
+Nota: o k8s trabalha com permissionamentoS. eSSE PERMISSIONAMENTO ESTA LIGADO DIRETAMENTE AO USU;ÁRIO QUE ESTA CADASTRADO NO SERVIÇO IDENTIDADE DO GOOGLE CLOUD.
+
+Entao ele tem que falar que o nosso usuário, referente a tal no k8s e esse cara no k8s deve ter acesso a esse tipo de role que ele vá trabalhar.
+
+O cert manager tem a opçáo que podemos instalar utilizando Helm ou a opçao que podemos instalar baseada no passo a passo que ele vai mostrar para nós. 
+
+Para variar um pouco, vamos fazer pelo passo a passo. Importante: da mesma forma que estamos trabalhando com o Ingress e criamos um namesmpaxe para o Ingress, devemos criar um namespace especifico para o CertManegr para nao ficar misturando com os nossos Pods. 
+
+Ele vai ter ali basicamente os seus permissionamentos e etc. Vamos seguir o passo a passo. 
+
+
+
+Vamos criar um namespacce para o cert manager
+
+````bash
+❯ kubectl create namespace cert-manager
+namespace/cert-manager created
+````
+
+E listar todos os namespace que temos:
+
+````bash
+❯ kubectl get ns
+NAME              STATUS   AGE
+cert-manager      Active   31s
+default           Active   3h27m
+ingress-nginx     Active   89m
+kube-node-lease   Active   3h27m
+kube-public       Active   3h27m
+kube-system       Active   3h27m
+````
+
+
+
+Os namespaces kube* sao os padroes do k8s. O dfefault é o que estamos rodando na nossa aplicação e o cert-manager é o que acabamos de criar.
+
+Agora. podemos usar a isntalaçáo com helm ou manual. 
+
+
+
+Vamos fazer a manual:
+
+````bash
+❯ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.1.1/cert-manager.yaml
+----
+customresourcedefinition.apiextensions.k8s.io/certificaterequests.cert-manager.io created
+customresourcedefinition.apiextensions.k8s.io/certificates.cert-manager.io created
+customresourcedefinition.apiextensions.k8s.io/challenges.acme.cert-manager.io created
+customresourcedefinition.apiextensions.k8s.io/clusterissuers.cert-manager.io created
+customresourcedefinition.apiextensions.k8s.io/issuers.cert-manager.io created
+customresourcedefinition.apiextensions.k8s.io/orders.acme.cert-manager.io created
+Warning: resource namespaces/cert-manager is missing the kubectl.kubernetes.io/last-applied-configuration annotation which is required by kubectl apply. kubectl apply should only be used on resources created declaratively by either kubectl create --save-config or kubectl apply. The missing annotation will be patched automatically.
+namespace/cert-manager configured
+serviceaccount/cert-manager-cainjector created
+serviceaccount/cert-manager created
+serviceaccount/cert-manager-webhook created
+clusterrole.rbac.authorization.k8s.io/cert-manager-cainjector created
+clusterrole.rbac.authorization.k8s.io/cert-manager-controller-issuers created
+clusterrole.rbac.authorization.k8s.io/cert-manager-controller-clusterissuers created
+clusterrole.rbac.authorization.k8s.io/cert-manager-controller-certificates created
+clusterrole.rbac.authorization.k8s.io/cert-manager-controller-orders created
+clusterrole.rbac.authorization.k8s.io/cert-manager-controller-challenges created
+clusterrole.rbac.authorization.k8s.io/cert-manager-controller-ingress-shim created
+clusterrole.rbac.authorization.k8s.io/cert-manager-view created
+clusterrole.rbac.authorization.k8s.io/cert-manager-edit created
+clusterrolebinding.rbac.authorization.k8s.io/cert-manager-cainjector created
+clusterrolebinding.rbac.authorization.k8s.io/cert-manager-controller-issuers created
+clusterrolebinding.rbac.authorization.k8s.io/cert-manager-controller-clusterissuers created
+clusterrolebinding.rbac.authorization.k8s.io/cert-manager-controller-certificates created
+clusterrolebinding.rbac.authorization.k8s.io/cert-manager-controller-orders created
+clusterrolebinding.rbac.authorization.k8s.io/cert-manager-controller-challenges created
+clusterrolebinding.rbac.authorization.k8s.io/cert-manager-controller-ingress-shim created
+role.rbac.authorization.k8s.io/cert-manager-cainjector:leaderelection created
+role.rbac.authorization.k8s.io/cert-manager:leaderelection created
+role.rbac.authorization.k8s.io/cert-manager-webhook:dynamic-serving created
+rolebinding.rbac.authorization.k8s.io/cert-manager-cainjector:leaderelection created
+rolebinding.rbac.authorization.k8s.io/cert-manager:leaderelection created
+rolebinding.rbac.authorization.k8s.io/cert-manager-webhook:dynamic-serving created
+service/cert-manager created
+service/cert-manager-webhook created
+Warning: Autopilot set default resource requests for Deployment cert-manager/cert-manager-cainjector, as resource requests were not specified. See http://g.co/gke/autopilot-defaults.
+deployment.apps/cert-manager-cainjector created
+Warning: Autopilot set default resource requests for Deployment cert-manager/cert-manager, as resource requests were not specified. See http://g.co/gke/autopilot-defaults.
+deployment.apps/cert-manager created
+Warning: Autopilot set default resource requests for Deployment cert-manager/cert-manager-webhook, as resource requests were not specified. See http://g.co/gke/autopilot-defaults.
+deployment.apps/cert-manager-webhook created
+Warning: AdmissionWebhookController: mutated namespaceselector of the webhooks to enforce GKE Autopilot policies.
+mutatingwebhookconfiguration.admissionregistration.k8s.io/cert-manager-webhook created
+validatingwebhookconfiguration.admissionregistration.k8s.io/cert-manager-webhook created
+
+
+````
+
+Agora, vamos dar um get Pots para namespaces 
+
+````bash
+❯ kubectl get po -n cert-manager
+NAME                                       READY   STATUS    RESTARTS   AGE
+cert-manager-5f8676b596-r7zln              1/1     Running   0          2m28s
+cert-manager-cainjector-59445c7dc9-vq644   1/1     Running   0          2m29s
+cert-manager-webhook-55f6cd8bc6-q5qz7      1/1     Running   0          2m27s
+
+````
+
+Pronto! Agora que temos os Pods responsssáveis pelo Cer Manager, vamos criar o set Issue. Esse é que fará a geraçáo e o issue do nosso certificado.
+
+
+
+### Configurando e emitindo certificado
+
+Vamos fazer o nosso certificado funcionar. Vamos criar um tipo de objeto Ussuer pq instalamos o Cert-Manager. Esse arquivo chamaremos de cert manager que é'chamado de clusterIssuer. Ele é que vai se responsabilizar para fazer a geraçáo dos nossos certificados.
+
+No arquivo abaixo, o kind só é possivel pq instalamos a API do cert-manager
+
+cluster-issue.yaml
+
+````yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt
+  namespace: cert-manager
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: roger10cassares@gmail.com
+    privateKeySecretRef:
+      name: letsencrypt-tls
+    solvers:
+    - http01:
+        ingress:
+          class: nginx
+
+````
+
+
+
+E agora vamos aplicar essa configuraçáo
+
+````bash
+❯ kubectl apply -f k8s/cluster-issuer.yaml
+Error from server (InternalError): error when creating "k8s/cluster-issuer.yaml": Internal error occurred: failed calling webhook "webhook.cert-manager.io": failed to call webhook: Post "https://cert-manager-webhook.cert-manager.svc:443/mutate?timeout=10s": x509: certificate signed by unknown authority
+````
+
+SE NAO FOSSE ESSE ERRO, A PARTIR DE AGORA ESTARAMOS APTOS A GERAR OS NOSSOS CERTIFICADOS CONFORME FORMOS PRECISANDO.
+
+
+
+Utilizando o ingress comum dns configurado corretamente, podemos aplicar o comando 
+
+```bash
+❯ kubectl apply -f k8s/cluster-issuer.yaml
+```
+
+A partir de aoraestamosaptosa trabalhar no Ingress efazer comque ele gere os nossos certificados conforme formos precisando. 
+
+Vamos entao trabalhar com o Ingress e trabalhar com as annotations. As annotations vao ser uteis aqui para a gente para resolvermos exatamente sse  tipo de problema e o cert manager saber que vamos usar o ingress para a emissao desse tipo de certificado.
+
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+
+## Namespaces e Service ACCOUNTS
+
+## Namespaces
+
+Agora vamos falar de alguns assuntos extremamente imopoortantes quando formos fazer deploy., colocar em produçao a nossa app com k8s ou mesmo como vamos conseguir separar os nossos projetos na hora que formos fazer a instalaçao.  
+
+A primeira coisa a se entender é o coneceito de Namespaces. Para que serve o namepace? O namespace é basicamente uma separacao virtual logica do nosso cluster k8s para onde fazemos a instalacao de cada coisa.
+
+Entao, por exemplo, todas as vezes que a gente estava instalanmdo qualquer coisa estavamos instalando no namespace default.
+
+Se dermos o comando abaixo com a respectiva saida
+
+```bash
+kubectl get po
+No resources found in default namespace.
+```
+
+Isso significa que sempre que vamois acessar o k8s quando fazemos uma instalaçao e quando nao falamos qual eh o namespace, ele vao instalart tudo aquilo no nosso namespace padrao.
+
+Mas para que o namespace?
+
+
+
+Vamos imaginar que temos um projeto1. Entao tudo o que formos instalar, vamos instalar esse projeto 1 no namespace 1.
+
+\Se formos instalar um projeto2 no namespace2, é possivel fazer essa separaçao. 
+
+Mas o mais bacana de tudo é que quando estamos trabvalhando com esses dois projetos, eventua;mente, se setarmos recursos do nosso k8s, podemos falar que o namespace1 tem tanto de recurso. E o namespace 2 tem menos recursos! Entao um namespace nao consegue extrapolar e prejudicar o outro ali no k8s. Tb toda a parte de segurança e de acesso nós conseguimos fazer essa separaçao tb com o namespace. 
+
+Portanto, é sempre recomendado, toda a vez em que formos criar um projeto específico ou fazer um deploy de forma geral dentro de um projeto como um todo, cria um namespace específico para aquele projeto porque vai ficar tudo muito mais separado. 
+
+Uma outra coisa importante tb que muita gente faz, é semprar os namepaces de um ambiente de desenvolvimento de um ambiente de produçao. No caso, o wesley, de forma geral recomenda que se ternha um cluster para cada coisa, mas se vc só tem or;camento para um cluster, vc ainda pode separar pq terás ainda que em um cluster, a mesma aplicaçao em modo de desenvolvimento e em modo de produçao apenas criando o namespace. Vamos ver isso na pratica!
+
+```bash
+❯ kubectl get ns
+NAME              STATUS   AGE
+cert-manager      Active   43h
+default           Active   2d4h
+ingress-nginx     Active   2d1h
+kube-node-lease   Active   2d4h
+kube-public       Active   2d4h
+kube-system       Active   2d4h
+```
+
+Ele vai mostrar todos os namespaces que temos nosso cluster.
+
+O default é sempre quando nao passamos nada. 
+
+Se dermos o seguinte comando
+
+```bahs
+❯ kubectl get po -n=kube-system 
+NAME                                                     READY   STATUS    RESTARTS   AGE
+anetd-2whr4                                              1/1     Running   0          2d4h
+anetd-cxptw                                              1/1     Running   0          2d1h
+anetd-dpqzb                                              1/1     Running   0          2d1h
+anetd-kchls                                              1/1     Running   0          2d1h
+anetd-kltq6                                              1/1     Running   0          2d1h
+anetd-kwqfg                                              1/1     Running   0          2d4h
+anetd-rgwsl                                              1/1     Running   0          43h
+antrea-controller-horizontal-autoscaler-8484b5d7-hnttk   1/1     Running   0          2d4h
+egress-nat-controller-5bb85946bc-fwc9z                   1/1     Running   0          2d4h
+event-exporter-gke-5dc976447f-4lc62                      2/2     Running   0          2d4h
+filestore-node-7mfnl                                     3/3     Running   0          2d1h
+filestore-node-869gh                                     3/3     Running   0          2d1h
+filestore-node-glf5w                                     3/3     Running   0          2d1h
+filestore-node-jjxw4                                     3/3     Running   0          2d4h
+filestore-node-kmqg8                                     3/3     Running   0          2d1h
+filestore-node-mkv9x                                     3/3     Running   0          2d4h
+filestore-node-t87th                                     3/3     Running   0          43h
+fluentbit-gke-big-2wzkq                                  2/2     Running   0          43h
+fluentbit-gke-small-57mnv                                2/2     Running   0          2d4h
+fluentbit-gke-small-bcngv                                2/2     Running   0          2d1h
+fluentbit-gke-small-dfr5t                                2/2     Running   0          2d1h
+fluentbit-gke-small-lxjk2                                2/2     Running   0          2d1h
+fluentbit-gke-small-sl2nl                                2/2     Running   0          2d4h
+fluentbit-gke-small-sr7ff                                2/2     Running   0          2d1h
+gke-metadata-server-2c4d8                                1/1     Running   0          2d1h
+gke-metadata-server-95p2c                                1/1     Running   0          43h
+gke-metadata-server-lqtrt                                1/1     Running   0          2d1h
+gke-metadata-server-rg6rv                                1/1     Running   0          2d4h
+gke-metadata-server-wtwpc                                1/1     Running   0          2d4h
+gke-metadata-server-x5lq8                                1/1     Running   0          2d1h
+gke-metadata-server-ztr2k                                1/1     Running   0          2d1h
+gke-metrics-agent-2gzpp                                  1/1     Running   0          2d4h
+gke-metrics-agent-79mds                                  1/1     Running   0          2d4h
+gke-metrics-agent-9scsb                                  1/1     Running   0          2d1h
+gke-metrics-agent-c9w7v                                  1/1     Running   0          2d1h
+gke-metrics-agent-n725x                                  1/1     Running   0          43h
+gke-metrics-agent-pxh8v                                  1/1     Running   0          2d1h
+gke-metrics-agent-tfml4                                  1/1     Running   0          2d1h
+ip-masq-agent-d5vm4                                      1/1     Running   0          2d4h
+ip-masq-agent-h2w57                                      1/1     Running   0          2d1h
+ip-masq-agent-jzg6q                                      1/1     Running   0          2d4h
+ip-masq-agent-mmx9d                                      1/1     Running   0          2d1h
+ip-masq-agent-tmb8p                                      1/1     Running   0          43h
+ip-masq-agent-wsnwz                                      1/1     Running   0          2d1h
+ip-masq-agent-z5hqt                                      1/1     Running   0          2d1h
+konnectivity-agent-775dbdcf94-5gst4                      1/1     Running   0          2d4h
+konnectivity-agent-775dbdcf94-89hvg                      1/1     Running   0          2d1h
+konnectivity-agent-775dbdcf94-bx6cr                      1/1     Running   0          2d1h
+konnectivity-agent-775dbdcf94-f529g                      1/1     Running   0          2d1h
+konnectivity-agent-775dbdcf94-m54rr                      1/1     Running   0          2d1h
+konnectivity-agent-775dbdcf94-nvc5r                      1/1     Running   0          2d4h
+konnectivity-agent-autoscaler-658b588bb6-9jr6d           1/1     Running   0          2d4h
+kube-dns-598f9895c6-2x9tj                                4/4     Running   0          2d4h
+kube-dns-598f9895c6-j9jdx                                4/4     Running   0          2d4h
+kube-dns-autoscaler-fbc66b884-d9cvs                      1/1     Running   0          2d4h
+l7-default-backend-6b99559c7d-pgwdh                      1/1     Running   0          2d4h
+metrics-server-v0.5.2-9b67f66b8-fbgwf                    2/2     Running   0          2d1h
+netd-4fldl                                               1/1     Running   0          43h
+netd-7hn2l                                               1/1     Running   0          2d4h
+netd-hwzpg                                               1/1     Running   0          2d1h
+netd-j768z                                               1/1     Running   0          2d1h
+netd-l79zq                                               1/1     Running   0          2d1h
+netd-n5fjg                                               1/1     Running   0          2d1h
+netd-zsvgm                                               1/1     Running   0          2d4h
+node-local-dns-4nc8r                                     1/1     Running   0          2d1h
+node-local-dns-86kbb                                     1/1     Running   0          2d4h
+node-local-dns-f6tck                                     1/1     Running   0          2d1h
+node-local-dns-h2jpc                                     1/1     Running   0          2d1h
+node-local-dns-hx9kx                                     1/1     Running   0          43h
+node-local-dns-qzmwd                                     1/1     Running   0          2d4h
+node-local-dns-w2l7n                                     1/1     Running   0          2d1h
+pdcsi-node-55b7c                                         2/2     Running   0          2d4h
+pdcsi-node-hr4pr                                         2/2     Running   0          2d1h
+pdcsi-node-hwfvd                                         2/2     Running   0          2d4h
+pdcsi-node-mnddl                                         2/2     Running   0          2d1h
+pdcsi-node-r5tpx                                         2/2     Running   0          2d1h
+pdcsi-node-znhw7                                         2/2     Running   0          2d1h
+pdcsi-node-zt8c2                                         2/2     Running   0          43h
+```
+
+ 
+
+Ele vai listar todos os Pods que estao rodando no kube-system. E até agora nós nao havíamos visto, de uma forma geral, esses namespaces rodando pq eles estao separados por namespaces. E dessa forma fica muito melhor de conseguirmos trabalhar e separar, de fato, de forma geral as nossas aplicações.
+
+Mas como criuamos um namespcxae utilizando o k8s? 
+
+Veja
+
+```bash
+❯ kubectl create ns dev 
+namespace/dev created
+```
+
+Pronto! Vamos ver
+
+```bash
+❯ kubectl get ns
+NAME              STATUS   AGE
+cert-manager      Active   43h
+default           Active   2d4h
+dev               Active   28s
+ingress-nginx     Active   2d1h
+kube-node-lease   Active   2d4h
+kube-public       Active   2d4h
+kube-system       Active   2d4h
+```
+
+Aora vemos que temos um namespace dev que podemos trabalhar. Agora, todas as vezes que formos fazer e subir um novo deployment, basta identificarmos em qual namespace queremos trabalhar! 
+
+```bash
+❯ kubectl apply -d k8s/.yaml -n=dev 
+```
+
+E entao o k8s fará o provisionamento do manifesto no nsmaspace dev! 
+
+Também, o que podemos fazer, é que quando estamos em um arquivo de deployment, quando chega ali nos metadados (metadata), podemos colocar o nome do namespace que queremos realizar o apply.
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: dev
+  name: goserver
+  labels:
+    app: goserver
+spec:
+  selector:
+    matchLabels:
+      app: goserver
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: "goserver"
+    spec:
+      containers:
+        - name: goserver
+          image: "rogeriocassares/hello-go:v9.7"
+
+          resources:
+            requests:
+              cpu: "0.05"
+              memory: 20Mi
+            limits:
+              cpu: "0.05"
+              memory: 25Mi
+
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 30
+            failureThreshold: 1
+            # initialDelaySeconds: 10
+
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 3
+            failureThreshold: 1
+            # initialDelaySeconds: 10
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 5
+            failureThreshold: 1
+            timeoutSeconds: 1
+            successThreshold: 1
+            # initialDelaySeconds: 15
+
+          envFrom:
+            - configMapRef:
+                name: goserver-env
+            - secretRef:
+                name: goserver-secret
+
+          volumeMounts:
+            - mountPath: "/go/myfamily"
+              name: config
+              readOnly: true
+            - mountPath: "/go/pvc"
+              name: goserver-volume
+
+      volumes:
+        - name: goserver-volume
+          persistentVolumeClaim:
+            claimName: goserver-pvc
+
+        - name: config
+          configMap:
+            name: configmap-family
+            items:
+              - key: members
+                path: "family.txt"
+
+```
 
 
 
 
 
+`Enato, de forma geral, nós precisamos citar sempre o processo do ns para conseguirmos =organizar. Tudo o que fizemos até agora, ou se vamos subir algo muito simples no k8s, nao tem problemna colocar no default. Mas, vioa de regra, é recomendado que exista um namespace por projeto! 
+
+De qualquer forma a criatividade é o limite! Entao podemos organizar por namespaces por projeto, por namespace chamdo dev-proj1. dev-proj2 e dev-proj3 com prod-proj1, prod-prod2 e prod-proj3, por exemplo. Ou somente dev com tudo o que roda como dev e prod com tudo o que rodamos como prod.
+
+Agora vamos criar um novo deployment para falar inclusive sobre segurança! POis o k8s vem bem aberto na parte de segurança e isso pode trazer alguns riscos para nós.
+
+
+
+### Contextos por namespace
+
+Agora vmaos ver como trabalhar com namespace no nosso dia a dia sem confundir qualk ambiente que estamos no nosso monento. 
+
+Vamos imaginar qquer queremos fazer um deployment. Na hora que formos fazer o deployment, passamos o namespace que queremos. Mas e se esquecemos de passar, o que vai acontecer? Ja pensou se estamos fazendo um deployment que é para ser feito no dev e sem querer fazemos no ambiente de produçao?
+
+Entao o que faremos é criar um deployment bem simples e vamos explorar os secursos de namespaces.
+
+Vamos criar um diretorio namespaces e um arquiovo de deployment.yaml
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server
+spec:
+  selector:
+    matchLabels:
+      app: server
+  template:
+    metadata:
+      labels:
+        app: server
+    spec:
+      containers:
+      - name: server
+        image: rogeriocassares/hello-express
+        resources:
+          limits:
+            memory: "128Mi"
+            cpu: "500m"
+        ports:
+        - containerPort: 3000
+
+```
+
+
+
+Vamos aplicá-lo!
+
+```bash
+❯ kubectl apply -f deployment.yaml 
+Warning: Autopilot set default resource requests for Deployment default/server, as resource requests were not specified. See http://g.co/gke/autopilot-defaults.
+deployment.apps/server created
+```
+
+Pronto! Criamos o nosso deployment
+
+```bash
+❯ kubectl get po
+NAME                        READY   STATUS    RESTARTS   AGE
+goserver-546c7b4948-qnmz2   1/1     Running   0          2d2h
+mysql-0                     1/1     Running   0          2d2h
+mysql-1                     1/1     Running   0          2d2h
+server-6cd8bdcb98-826cl     1/1     Running   0          53s
+```
+
+
+
+Entretanto, temos ele rodfando no namespace default!
+
+Vamos agora rodar o mesmo comando com -n=dev
+
+❯ kubectl apply -f deployment.yaml -n=dev
+Warning: Autopilot set default resource requests for Deployment dev/server, as resource requests were not specified. See http://g.co/gke/autopilot-defaults.
+deployment.apps/server created
+
+O que fizemos agora foi criar esse mesmo POd / deployment no novo namespace dev.
+
+Agora vamos criar um namespace  de produçao
+
+```bash
+❯ kubectl create namespace prod
+namespace/prod created
+```
+
+E vamos rodar esse mesmo comando do deployment no namespace prod!
+
+```bash
+❯ kubectl apply -f deployment.yaml -n=prod
+Warning: Autopilot set default resource requests for Deployment prod/server, as resource requests were not specified. See http://g.co/gke/autopilot-defaults.
+deployment.apps/server created
+```
+
+
+
+Vamos listar os pods no namespace default
+
+```bash
+❯ kubectl get po
+NAME                        READY   STATUS    RESTARTS   AGE
+goserver-546c7b4948-qnmz2   1/1     Running   0          2d2h
+mysql-0                     1/1     Running   0          2d2h
+mysql-1                     1/1     Running   0          2d2h
+server-6cd8bdcb98-826cl     1/1     Running   0          7m8s
+```
+
+Agora, vamos listar  o namespace dev
+
+❯ kubectl get po -n=dev
+NAME                      READY   STATUS    RESTARTS   AGE
+server-6cd8bdcb98-rqhz9   1/1     Running   0          3m47s
+
+E se colcoarmos prod
+
+```bash
+❯ kubectl get po -n=prod
+NAME                      READY   STATUS    RESTARTS   AGE
+server-6cd8bdcb98-s2ggl   1/1     Running   0          2m25s
+```
+
+Ele traz o mesmo ambiente no namespace de produçao! ENtao poderiamos fazer essa separaçao.
+
+COmo podemos ver todos os deployments juntios?
+
+Lembra-se que trabalhamos tanto com labels nos squivos de maifestos .yaml? Entao poderiamos trabalhar e fazermos um filtro pelas labels!
+
+Vamos ver com as labels como server
+
+```bash
+❯ kubectl get po -l app=server
+NAME                      READY   STATUS    RESTARTS   AGE
+server-6cd8bdcb98-826cl   1/1     Running   0          11m
+```
+
+
+
+Entao aqui conseguimos ver todos os Pods em que o app é igual a server.
 
 
 
 
 
+Agora, tem umas coisas muito interessantes que devemos levar em consifderaçao!
+
+Vamos ver o sqguinte:
+
+Vamos imaginar que estamos trabalhando no nosso dia a dia e queremos pegar os Pos do dev
+
+```bash
+❯ kubectl get po -n=dev
+NAME                      READY   STATUS    RESTARTS   AGE
+server-6cd8bdcb98-rqhz9   1/1     Running   0          35m
+```
+
+Agora vamos rodar um deployment
+
+```bash
+❯ kubectl apply -f deployment.yaml 
+Warning: Autopilot increased resource requests for Deployment default/server to meet requirements. See http://g.co/gke/autopilot-resources.
+deployment.apps/server configured
+```
+
+OH naoo! Era para rodarmos no ambiente de dev e nao de produçao!
+
+E agora? 
+
+Vemos que quando começamos a trabalhar dessa forma começamos a ter um perigo muito grande. E é por conta disso que a gente pode utilizar um recurso do k8s que é bem interessante e que é chamado de contextos.
+
+Quando estamos trabalhando com o k8s, existe um arquivo que é chamado de config
+
+❯ cat ~/.kube/config
+
+Esse arquivo traz um arquivo tb com toidas as  credenciais que estamos trabalhando no k8s.
+
+O que podemo tb fazwer para ver essas configuraçoes?
+
+POdemos verificar atraves dos comanbdos do kubectl.
+
+```bash
+❯ kubectl config view
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: DATA+OMITTED
+    server: https://34.151.193.17
+  name: gke_brilliant-tide-369315_southamerica-east1_autopilot-cluster-3
+- cluster:
+    certificate-authority-data: DATA+OMITTED
+    server: https://34.27.46.86
+  name: gke_brilliant-tide-369315_us-central1_autopilot-cluster-1
+- cluster:
+    certificate-authority-data: DATA+OMITTED
+    server: https://0.0.0.0:35809
+  name: k3d-fullcycle
+contexts:
+- context:
+    cluster: gke_brilliant-tide-369315_southamerica-east1_autopilot-cluster-3
+    user: gke_brilliant-tide-369315_southamerica-east1_autopilot-cluster-3
+  name: gke_brilliant-tide-369315_southamerica-east1_autopilot-cluster-3
+- context:
+    cluster: gke_brilliant-tide-369315_us-central1_autopilot-cluster-1
+    user: gke_brilliant-tide-369315_us-central1_autopilot-cluster-1
+  name: gke_brilliant-tide-369315_us-central1_autopilot-cluster-1
+- context:
+    cluster: k3d-fullcycle
+    user: admin@k3d-fullcycle
+  name: k3d-fullcycle
+- context:
+    cluster: k3d-fullcycle-k3d
+    user: admin@k3d-fullcycle-k3d
+  name: k3d-fullcycle-k3d
+- context:
+    cluster: kind-fullcycle
+    user: kind-fullcycle
+  name: kind-fullcycle
+current-context: gke_brilliant-tide-369315_southamerica-east1_autopilot-cluster-3
+kind: Config
+preferences: {}
+users:
+- name: admin@k3d-fullcycle
+  user:
+    client-certificate-data: REDACTED
+    client-key-data: REDACTED
+- name: admin@k3d-fullcycle-k3d
+  user:
+    client-certificate-data: REDACTED
+    client-key-data: REDACTED
+- name: gke_brilliant-tide-369315_southamerica-east1_autopilot-cluster-3
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1beta1
+      args: null
+      command: gke-gcloud-auth-plugin
+      env: null
+      installHint: Install gke-gcloud-auth-plugin for use with kubectl by following
+        https://cloud.google.com/blog/products/containers-kubernetes/kubectl-auth-changes-in-gke
+      interactiveMode: IfAvailable
+      provideClusterInfo: true
+- name: gke_brilliant-tide-369315_us-central1_autopilot-cluster-1
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1beta1
+      args: null
+      command: gke-gcloud-auth-plugin
+      env: null
+      installHint: Install gke-gcloud-auth-plugin for use with kubectl by following
+        https://cloud.google.com/blog/products/containers-kubernetes/kubectl-auth-changes-in-gke
+      interactiveMode: IfAvailable
+      provideClusterInfo: true
+- name: kind-fullcycle
+  user:
+    client-certificate-data: REDACTED
+    client-key-data: REDACTED
+```
 
 
 
+E quando damos esse comando acima, eke traz as configuraçoes do cluster que estamos utilizando do GKE, nesse caso. Isso ;e um ponto. Mas essas configuraçoes, por padrao, elas fazem com que o nosso contexto principal entre direto no nosso namespace default e veja tudo o que está lá/
+
+MAs o que podemos fazer? POdemos criar novos contexto para nos ajudar no dia a dia!
+
+Vamos analisar o comando abaixo
+
+❯ kubectl config current-context
+gke_brilliant-tide-369315_southamerica-east1_autopilot-cluster-3
+
+o K8s nos mostra o nome do nosso  contexto atual que é o descrito acima. 
+
+Vamos configurar um contexto agora com o nosso cluster e usuário atuais!
+
+```bash
+❯ kubectl config set-context dev --namespace=dev --cluste
+r=gke_brilliant-tide-369315_southamerica-east1_autopilot-cluster-3 --user=gke_brilliant-tide-369315_southamerica-east1_autopilot-cluster-3
+Context "dev" created.
+```
+
+Nesse momento, criamos um contexto chamado dev. Agora vamos criar um contexto chamado prod!
+
+```bash
+❯ kubectl config set-context prod --namespace=prod --cluster=gke_brilliant-tide-369315_southamerica-east1_autopilot-cluster-3 --user=gke_brilliant-tide-369315_southamerica-east1_autopilot-cluster-3
+Context "prod" created.
+```
+
+Pronto!
+
+Agora temos dois contextos! Um chamado dev e o outro chamado prod. 
+
+Entao, quamdo damos um
+
+❯ kubectl config view       
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: DATA+OMITTED
+    server: https://34.151.193.17
+  name: gke_brilliant-tide-369315_southamerica-east1_autopilot-cluster-3
+- cluster:
+    certificate-authority-data: DATA+OMITTED
+    server: https://34.27.46.86
+  name: gke_brilliant-tide-369315_us-central1_autopilot-cluster-1
+- cluster:
+    certificate-authority-data: DATA+OMITTED
+    server: https://0.0.0.0:35809
+  name: k3d-fullcycle
+    contexts:
+- context:
+    cluster: gke_brilliant-tide-369315_southamerica-east1_autopilot-cluster-3
+    namespace: dev
+    user: gke_brilliant-tide-369315_southamerica-east1_autopilot-cluster-3
+  name: dev
+- context:
+    cluster: gke_brilliant-tide-369315_southamerica-east1_autopilot-cluster-3
+    user: gke_brilliant-tide-369315_southamerica-east1_autopilot-cluster-3
+  name: gke_brilliant-tide-369315_southamerica-east1_autopilot-cluster-3
+- context:
+    cluster: gke_brilliant-tide-369315_us-central1_autopilot-cluster-1
+    user: gke_brilliant-tide-369315_us-central1_autopilot-cluster-1
+  name: gke_brilliant-tide-369315_us-central1_autopilot-cluster-1
+- context:
+    cluster: k3d-fullcycle
+    user: admin@k3d-fullcycle
+  name: k3d-fullcycle
+- context:
+    cluster: k3d-fullcycle-k3d
+    user: admin@k3d-fullcycle-k3d
+  name: k3d-fullcycle-k3d
+- context:
+    cluster: kind-fullcycle
+    user: kind-fullcycle
+  name: kind-fullcycle
+- context:
+    cluster: gke_brilliant-tide-369315_southamerica-east1_autopilot-cluster-3
+    namespace: prod
+    user: gke_brilliant-tide-369315_southamerica-east1_autopilot-cluster-3
+  name: prod
+    current-context: gke_brilliant-tide-369315_southamerica-east1_autopilot-cluster-3
+    kind: Config
+    preferences: {}
+    users:
+- name: admin@k3d-fullcycle
+  user:
+    client-certificate-data: REDACTED
+    client-key-data: REDACTED
+- name: admin@k3d-fullcycle-k3d
+  user:
+    client-certificate-data: REDACTED
+    client-key-data: REDACTED
+- name: gke_brilliant-tide-369315_southamerica-east1_autopilot-cluster-3
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1beta1
+      args: null
+      command: gke-gcloud-auth-plugin
+      env: null
+      installHint: Install gke-gcloud-auth-plugin for use with kubectl by following
+        https://cloud.google.com/blog/products/containers-kubernetes/kubectl-auth-changes-in-gke
+      interactiveMode: IfAvailable
+      provideClusterInfo: true
+- name: gke_brilliant-tide-369315_us-central1_autopilot-cluster-1
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1beta1
+      args: null
+      command: gke-gcloud-auth-plugin
+      env: null
+      installHint: Install gke-gcloud-auth-plugin for use with kubectl by following
+        https://cloud.google.com/blog/products/containers-kubernetes/kubectl-auth-changes-in-gke
+      interactiveMode: IfAvailable
+      provideClusterInfo: true
+- name: kind-fullcycle
+  user:
+    client-certificate-data: REDACTED
+    client-key-data: REDACTED
+
+```bash
+
+```
+
+Vemos que nessas configuraçoes vamos poder trabalhar com um contexto chamado prod e um contexto chamado dev.
+
+Agora as coisas ficam um pouco mais simples, pois podemos executar 
+
+❯ kubectl config use-context dev
+Switched to context "dev".
+
+E agora estamos no contexto dev.  Vamos verificar
+
+```bash
+❯ kubectl config current-context
+```
+
+Agora se dermos 
+
+```bash
+❯ kubectl get po
+NAME                      READY   STATUS    RESTARTS   AGE
+server-6cd8bdcb98-rqhz9   1/1     Running   0          58m
+```
+
+Estamos vendo que ele está mostrando o nosso Pod que estava rodando agora ali.
+
+Agora vamos fazer o deletar o deploymente server onde o namespace é o default
+
+```bash
+kubectl delete deployment server -n=default 
+deployment.apps "server" deleted
+```
+
+E tb vamos matar onde o namespace é igual a prod
+
+```bash
+❯ kubectl delete deployment server -n=prod   
+deployment.apps "server" deleted
+```
+
+Vamos verificar os Pod que estao rodando no nosso namespace
+
+```bash
+❯ kubectl get po
+NAME                      READY   STATUS    RESTARTS   AGE
+server-6cd8bdcb98-rqhz9   1/1     Running   0          62m
+```
+
+O nosso Pod ainda está rodando pois estamos em modo de dev!
+
+Agora vamos mudar de contexto para o prod
+
+```bash
+❯ kubectl config use-context prod
+Switched to context "prod".
+```
+
+Vamos verificar os Pods rodando nesse contexto que se refere ao namespace prod:
+
+```bash
+❯ kubectl get po
+No resources found in prod namespace.
+```
+
+E nao veio nada aqui no nosso namespace Por pq estamos por padrao no nosso namespace PRod!
+
+ISSO AQUI AJUDA DEMAIS QUANDO ESTAMOS TRABALHANDO NO MODO DE PRODUÇAO E NO MODO DE DESENVOLVIMENTO QUANDO ESTAMOS UTILIZANDO O K8S NO DIA A DIA!
+
+ENTAO SE ESTAMOS FAZENDO ESSE TIPO DE SEPARAÇAO, DEVEMOS TRABALHAR MINIMAMENTE COM ALGUMACOISA DESSE TIPO POIS VAI FACILITAR MUOITO A NOSS VIDA POIS CONSEGUIMOS TER ESSAS DIFERENÇARS E CONBFIGURAR ISSO PARA O NOSSO AMBIENTE.
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+### Entendendo Service Accounts
