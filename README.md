@@ -6750,7 +6750,7 @@ Agora. podemos usar a isntalaçáo com helm ou manual.
 Vamos fazer a manual:
 
 ````bash
-❯ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.1.1/cert-manager.yaml
+❯ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.3.0/cert-manager.yaml
 ----
 customresourcedefinition.apiextensions.k8s.io/certificaterequests.cert-manager.io created
 customresourcedefinition.apiextensions.k8s.io/certificates.cert-manager.io created
