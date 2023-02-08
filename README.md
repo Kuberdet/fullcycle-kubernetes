@@ -7575,3 +7575,157 @@ ENTAO SE ESTAMOS FAZENDO ESSE TIPO DE SEPARAÇAO, DEVEMOS TRABALHAR MINIMAMENTE 
 
 
 ### Entendendo Service Accounts
+
+Ua consideraçcao extremamente importante que devemoster e lembrar sempre antes de subir umaaplicaçcao no ar com ok8s. O que acontece é que quandosubimosuma aplica]cao nok8s, essa aplicaçao, de um forma ou de outra, precisa teruma permissao para rodar dentro do k8s.
+
+Entao, vamos imaginar que toda vez que subimos um deployment, um Pod ou qualquer coisa desse tipo, esse caa está sendo executado no k8s. O que aconteceé que toda vez queentramos nesse Pd, esse Pod, de alguma forma necessita ter credenciais para estar rodando ali 
+
+Entao tudo isso é feito atraves de algo que chamamos de SERVICE ACCOUNT, ISTO É, UMA CONTA DE SERVIÇO. qUALQUER COISA QUE SUBIRMOS NO k8S podemos pegar, por exemplo, um Deployment e falar que a sua conta de serviço é x e a parir das permissoes que existem naquela conta de serviço, aquele Pod vai poder secomunicar de alguma forma com a API do k8s.
+
+Entao isso significa que,  imaginamos que sbimos a nossa aplicaão de forma tudo certinha. E alguem entao consegue invadir essanossa aplicaçao. E uma vez que ela invada essa aplicaçao, ela pode tentar falar com a API do k8s. E se ela falar com a API do k8s, ela pode, por exemplo, pegar, os Pods, deletá-los, criar deployments, rodar comandos nos nossos POds, e o pior de tudo isso é que ela consegue ir escalando tudo isso para acessar os Services, acessar o kube-system, acessar outros namespaces e dai ja da para perceber que basta uma aplicaçao ter algum problema de segurança que a pessoa ou o hacker vai conseguir escalar o acesso para o nosso cluster inteiro! 
+
+NIsso já da para perceber o quao grave é isso!
+
+Por padra, o k8s já possui uma Service Account que ele utiliza para todos os depoyments que fazemos,
+
+```bash
+❯ kubectl get serviceaccounts 
+NAME      SECRETS   AGE
+default   1         78d
+
+```
+
+Entao, tudo o que estamos criando no k8s, seja Deployments ou qualquer outra coisa, tudo isso está sendo gerado atraves do Service Account DEFAULT! 
+
+Entretanto, existe um pequenino problema quando estamos rodando como Service Account Default no k8s. O problema é que a Service Account Default nos permite fazer tudo!
+
+Isso significa que se alguem entrar na nossaaplica~cao que esteja utilizando a serviceaccount padrao, simplesmente essa pessoa vai conseguir fazer tudo! Vale a paena criar entao uma Service Account por projeto e ai cria-se uma permissao especifica para aquele serviço possa apenas, por exemplo, ler os Pods, listar os pods, paraqueee possa teruma acesso bem limitado e ele nao consiga ir mais para frente e nem executar operaçes em nosso cluster. 
+
+
+
+Vejamos:
+
+```bash
+❯ kubectl get po
+NAME                        READY   STATUS      RESTARTS        AGE
+goserver-64695797bb-lnqqh   0/1     Error       53 (135m ago)   78d
+mysql-2                     0/1     Pending     0               40m
+goserver-64695797bb-lfqt9   0/1     Error       0               45m
+goserver-64695797bb-8vs7c   0/1     Pending     0               40m
+mysql-1                     0/1     Pending     0               39m
+mysql-3                     0/1     Completed   0               45m
+mysql-0                     0/1     Pending     0               39m
+
+```
+
+Vamos pegar um Pod e descrevê-lo.
+
+```bash
+❯ kubectl describe po goserver-64695797bb-lnqqh
+Name:             goserver-64695797bb-lnqqh
+Namespace:        default
+Priority:         0
+Service Account:  default
+Node:             k3d-fullcycle-server-0/172.21.0.3
+Start Time:       Mon, 21 Nov 2022 10:58:19 -0300
+Labels:           app=goserver
+                  pod-template-hash=64695797bb
+Annotations:      <none>
+Status:           Failed
+Reason:           Evicted
+Message:          The node was low on resource: ephemeral-storage. Container goserver was using 36Ki, which exceeds its request of 0. 
+IP:               10.42.0.232
+IPs:
+  IP:           10.42.0.232
+Controlled By:  ReplicaSet/goserver-64695797bb
+Containers:
+  goserver:
+    Container ID:   containerd://efbbad677de7045b7da0ab79c2ceae8456a04b0e181db2629cdf9ae3f1411ac8
+    Image:          rogeriocassares/hello-go:v9.7
+    Image ID:       docker.io/rogeriocassares/hello-go@sha256:a78e4c05be9147e62eb9f19ae0bc26c9d1404605fa07dde9a9fb9a0416fa4da6
+    Port:           <none>
+    Host Port:      <none>
+    State:          Terminated
+      Reason:       Error
+      Exit Code:    2
+      Started:      Tue, 07 Feb 2023 19:18:14 -0300
+      Finished:     Tue, 07 Feb 2023 20:48:32 -0300
+    Last State:     Terminated
+      Reason:       Unknown
+      Exit Code:    255
+      Started:      Sat, 04 Feb 2023 16:30:42 -0300
+      Finished:     Tue, 07 Feb 2023 19:17:39 -0300
+    Ready:          False
+    Restart Count:  53
+    Limits:
+      cpu:     50m
+      memory:  25Mi
+    Requests:
+      cpu:      50m
+      memory:   20Mi
+    Liveness:   http-get http://:8000/healthz delay=0s timeout=1s period=5s #success=1 #failure=1
+    Readiness:  http-get http://:8000/healthz delay=0s timeout=1s period=3s #success=1 #failure=1
+    Startup:    http-get http://:8000/healthz delay=0s timeout=1s period=30s #success=1 #failure=1
+    Environment Variables from:
+      goserver-env     ConfigMap  Optional: false
+      goserver-secret  Secret     Optional: false
+    Environment:       <none>
+    Mounts:
+      /go/myfamily from config (ro)
+      /go/pvc from goserver-volume (rw)
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-nqt7v (ro)
+Conditions:
+  Type              Status
+  Initialized       True 
+  Ready             False 
+  ContainersReady   False 
+  PodScheduled      True 
+Volumes:
+  goserver-volume:
+    Type:       PersistentVolumeClaim (a reference to a PersistentVolumeClaim in the same namespace)
+    ClaimName:  goserver-pvc
+    ReadOnly:   false
+  config:
+    Type:      ConfigMap (a volume populated by a ConfigMap)
+    Name:      configmap-family
+    Optional:  false
+  kube-api-access-nqt7v:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    ConfigMapOptional:       <nil>
+    DownwardAPI:             true
+QoS Class:                   Burstable
+Node-Selectors:              <none>
+Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+Events:
+  Type     Reason       Age                From     Message
+  ----     ------       ----               ----     -------
+  Warning  Evicted      46m                kubelet  The node was low on resource: ephemeral-storage. Container goserver was using 36Ki, which exceeds its request of 0.
+  Normal   Killing      46m                kubelet  Stopping container goserver
+  Warning  FailedMount  42m (x5 over 43m)  kubelet  MountVolume.SetUp failed for volume "config" : object "default"/"configmap-family" not registered
+  Warning  FailedMount  42m (x5 over 42m)  kubelet  MountVolume.SetUp failed for volume "kube-api-access-nqt7v" : object "default"/"kube-root-ca.crt" not registered
+```
+
+E se percebemos aqui, vemos que ele está montando um Volume dentro do nosso Pod! Isso porque além dos volumes que costumamos configurar, ele monta, automaticamente um outro volume em Mounts! E esse volume está na seguinte pasta /var/run/secrets/kubernetes.io/serviceaccount e ele está pegando, muito provavelmente os valores que estao dentro do segredo que o acompanha em kube-api-access-nqt7v dentro do serviceaccount default.
+
+Vamos dar uma explorada nele!
+
+```bash
+❯ kubectl exec -it goserver-64695797bb-lnqqh -- bash
+/usr/src/app# cd /var/run/secrets/kubernetes.io/serviceaccount
+/var/run/secrets/kubernetes.io/serviceaccount# ls
+ca.crt  namespace  token
+```
+
+Entao, nessa pasta, temos acesso ao qual certificado que ele está usando no k8s, acesso a qual namespace esse Pod esta rodando, e tambem acesso ao token JWT que o k8s vai utilizar para conseguirmos fazer as chamadas na API.
+
+O problemaé que esses arquivos eles fazem parte do nosso Service Account default, que permite, simplesmente, qualque um fazer o que quiser, isto ẽ, com essas informaçoes, ele consegue simplesmente executar comandos na API do k8s sem nenhum problema ou dificuldades. Entao preceisamos começar a ter um fator de limite para que todo mundo, de uma forma ou de outra, que consiga invadir a nossa aplicaçao, nao possa escalar. Isto ẃ, queremos reduzir esse risco!
+
+Vamos entao aprender a fazer e a atribuir uma service ccount para o nosso deployment e criar todas as permissoes que precisamos. 
+
+
+
+### Criando Service Account e Roles
+
