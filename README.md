@@ -7729,3 +7729,447 @@ Vamos entao aprender a fazer e a atribuir uma service ccount para o nosso deploy
 
 ### Criando Service Account e Roles
 
+
+
+Agoravamos criar uma niva Service Account, permissões, atribuir para o nosso deployment, e fazer tudo funcionar!
+
+Dentro de namespaces vamos criar um aquivo chamado security.yaml.
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: server
+```
+
+
+
+Vamos aplicar este arquivo 
+
+```bash
+❯ kubectl apply -f k8s/namespaces/security.yaml 
+serviceaccount/server created
+```
+
+E verificar os nossos Services Accounts
+
+```bash
+❯ kubectl get serviceaccounts
+NAME      SECRETS   AGE
+default   1         81d
+server    1         56s
+```
+
+
+
+A nossa ideia é conseguirmos sair do default e ir para o nosso serice Account. Mas nao adianta nada a gente mudar o nosso service account para o server e o service tb ter a permissao para fazer tudo! 
+
+Entao a nossa ideia é criarmos uma role. Uma role é uma funçao, um papel. Isto é., qual é a funçcai que determinada coisa que vamos criar terá. 
+
+O k8s trabalha com algo chamado de RBAC (rOLE Access Based). Isso significa que baseado em alguns papeis podemos dar determinado acesso para cada um. 
+
+UM api group determina quais sao os recursos que a gente vai poder trabalhar baseado na API que esse cara trabalha.
+
+```bash
+❯ kubectl get serviceaccounts
+NAME      SECRETS   AGE
+default   1         81d
+server    1         56s
+rogerio in fullcycle-kubernetes on  main [!?] 
+❯ kubectl api-resources
+NAME                              SHORTNAMES   APIVERSION                             NAMESPACED   KIND
+bindings                                       v1                                     true         Binding
+componentstatuses                 cs           v1                                     false        ComponentStatus
+configmaps                        cm           v1                                     true         ConfigMap
+endpoints                         ep           v1                                     true         Endpoints
+events                            ev           v1                                     true         Event
+limitranges                       limits       v1                                     true         LimitRange
+namespaces                        ns           v1                                     false        Namespace
+nodes                             no           v1                                     false        Node
+persistentvolumeclaims            pvc          v1                                     true         PersistentVolumeClaim
+persistentvolumes                 pv           v1                                     false        PersistentVolume
+pods                              po           v1                                     true         Pod
+podtemplates                                   v1                                     true         PodTemplate
+replicationcontrollers            rc           v1                                     true         ReplicationController
+resourcequotas                    quota        v1                                     true         ResourceQuota
+secrets                                        v1                                     true         Secret
+serviceaccounts                   sa           v1                                     true         ServiceAccount
+services                          svc          v1                                     true         Service
+mutatingwebhookconfigurations                  admissionregistration.k8s.io/v1        false        MutatingWebhookConfiguration
+validatingwebhookconfigurations                admissionregistration.k8s.io/v1        false        ValidatingWebhookConfiguration
+customresourcedefinitions         crd,crds     apiextensions.k8s.io/v1                false        CustomResourceDefinition
+apiservices                                    apiregistration.k8s.io/v1              false        APIService
+controllerrevisions                            apps/v1                                true         ControllerRevision
+daemonsets                        ds           apps/v1                                true         DaemonSet
+deployments                       deploy       apps/v1                                true         Deployment
+replicasets                       rs           apps/v1                                true         ReplicaSet
+statefulsets                      sts          apps/v1                                true         StatefulSet
+tokenreviews                                   authentication.k8s.io/v1               false        TokenReview
+localsubjectaccessreviews                      authorization.k8s.io/v1                true         LocalSubjectAccessReview
+selfsubjectaccessreviews                       authorization.k8s.io/v1                false        SelfSubjectAccessReview
+selfsubjectrulesreviews                        authorization.k8s.io/v1                false        SelfSubjectRulesReview
+subjectaccessreviews                           authorization.k8s.io/v1                false        SubjectAccessReview
+horizontalpodautoscalers          hpa          autoscaling/v2                         true         HorizontalPodAutoscaler
+cronjobs                          cj           batch/v1                               true         CronJob
+jobs                                           batch/v1                               true         Job
+certificatesigningrequests        csr          certificates.k8s.io/v1                 false        CertificateSigningRequest
+leases                                         coordination.k8s.io/v1                 true         Lease
+endpointslices                                 discovery.k8s.io/v1                    true         EndpointSlice
+events                            ev           events.k8s.io/v1                       true         Event
+flowschemas                                    flowcontrol.apiserver.k8s.io/v1beta2   false        FlowSchema
+prioritylevelconfigurations                    flowcontrol.apiserver.k8s.io/v1beta2   false        PriorityLevelConfiguration
+helmchartconfigs                               helm.cattle.io/v1                      true         HelmChartConfig
+helmcharts                                     helm.cattle.io/v1                      true         HelmChart
+addons                                         k3s.cattle.io/v1                       true         Addon
+nodes                                          metrics.k8s.io/v1beta1                 false        NodeMetrics
+pods                                           metrics.k8s.io/v1beta1                 true         PodMetrics
+ingressclasses                                 networking.k8s.io/v1                   false        IngressClass
+ingresses                         ing          networking.k8s.io/v1                   true         Ingress
+networkpolicies                   netpol       networking.k8s.io/v1                   true         NetworkPolicy
+runtimeclasses                                 node.k8s.io/v1                         false        RuntimeClass
+poddisruptionbudgets              pdb          policy/v1                              true         PodDisruptionBudget
+podsecuritypolicies               psp          policy/v1beta1                         false        PodSecurityPolicy
+clusterrolebindings                            rbac.authorization.k8s.io/v1           false        ClusterRoleBinding
+clusterroles                                   rbac.authorization.k8s.io/v1           false        ClusterRole
+rolebindings                                   rbac.authorization.k8s.io/v1           true         RoleBinding
+roles                                          rbac.authorization.k8s.io/v1           true         Role
+priorityclasses                   pc           scheduling.k8s.io/v1                   false        PriorityClass
+csidrivers                                     storage.k8s.io/v1                      false        CSIDriver
+csinodes                                       storage.k8s.io/v1                      false        CSINode
+csistoragecapacities                           storage.k8s.io/v1beta1                 true         CSIStorageCapacity
+storageclasses                    sc           storage.k8s.io/v1                      false        StorageClass
+volumeattachments                              storage.k8s.io/v1                      false        VolumeAttachment
+ingressroutes                                  traefik.containo.us/v1alpha1           true         IngressRoute
+ingressroutetcps                               traefik.containo.us/v1alpha1           true         IngressRouteTCP
+ingressrouteudps                               traefik.containo.us/v1alpha1           true         IngressRouteUDP
+middlewares                                    traefik.containo.us/v1alpha1           true         Middleware
+middlewaretcps                                 traefik.containo.us/v1alpha1           true         MiddlewareTCP
+serverstransports                              traefik.containo.us/v1alpha1           true         ServersTransport
+tlsoptions                                     traefik.containo.us/v1alpha1           true         TLSOption
+tlsstores                                      traefik.containo.us/v1alpha1           true         TLSStore
+traefikservices                                traefik.containo.us/v1alpha1           true         TraefikService
+```
+
+
+
+Quando acessarmos o api-resources, vamos ver lá em cima o Nome do recurso e o respectivo api-group. Quando nao temos o api-group podemos deixá-lo em branco.
+
+POrexeplo, o apigroup de namespace nao existe, nem o do configmap, persistenvolumes, pods ... Mas olha sõ quem tem um apigroup: deployments. O apigroup de deployments chama apps. Entao se quisermos saber qual API group que queremos liberar para a pessoa ter acesso podemos dar uma olhada nas respostas desse comando aqui tb.
+
+Entao, em nosso arquivo yaml, o primeiro grupo de apigroups deve ser em branco,pq vamos passar algumas regras e alguns papeis que nao existem apigroups nesse nosso caso.
+
+Qauis sao os resources que queremos trabalhar? Quais sao os verbos que eles vao poder utilizar nesses recursos que vamos dar a ele no k8s?
+
+Todos que tiverem essa regra vao poder acionar os recursos relacionados aos verbos 
+
+Fazemos a mesma coisa com um apiGroup de Deployments.
+
+COm isso estamos criando uma serie de regras que deixamos todos verem os serviços, ver os pods e ver os deployments. Mas perceba que nao esta sendo permitido colocar write em nada.  E esses tipos de coisas fazem muita diferença!
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: server
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: server-read
+rules:
+- apiGroups: [""]
+  resources: ["pods, services"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "watch", "list"]
+```
+
+
+
+Vamos verificar se tudo foi criado certinho
+
+```bash
+❯ kubectl apply -f k8s/namespaces/security.yaml
+serviceaccount/server unchanged
+role.rbac.authorization.k8s.io/server-read created
+```
+
+Masainda nao está pronto pq ainda precisamos pegar esse papel/role e atribuir para a nossa serviceaccount, isto é, precisamos fazer um bind, ou seja, indicar a cada sericeaccount qual role ele deve seguir!
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: server
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: server-read
+rules:
+- apiGroups: [""]
+  resources: ["pods, services"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "watch", "list"]
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: server-read-bind
+subjects:
+- kind: ServiceAccount
+  name: server
+  namespace: prod
+roleRef:
+  kind: Role
+  name: server-read
+  apiGroup: rbac.authorization.k8s.io
+
+
+
+```
+
+Com isso, criamos a nossa serviceaccount, criamos a nossa role e agora atribuimos a nossa role ao nosso serviceaccount. Entao vamos ver se vai funcionar.
+
+```bash
+❯ kubectl apply -f k8s/namespaces/security.yaml
+serviceaccount/server unchanged
+role.rbac.authorization.k8s.io/server-read unchanged
+rolebinding.rbac.authorization.k8s.io/server-read-bind created
+```
+
+
+
+Estã agora funcionando? Nao ainda! Pq ainda temos que falar para o nosso deployment que a serviceaccount que ele vai utilizar agora é o server!
+
+Enatao vamos configurar o nosso deployment e, em cima das nossas especificaçoes, antes do container, inserimos a configuraçao de sericeaccount:  server
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server
+spec:
+  selector:
+    matchLabels:
+      app: server
+  template:
+    metadata:
+      labels:
+        app: server
+    spec:
+      serviceAccount: server
+      containers:
+      - name: server
+        image: rogeriocassares/hello-express
+        resources:
+          limits:
+            memory: "128Mi"
+            cpu: "500m"
+        ports:
+        - containerPort: 3000
+
+```
+
+Agora, nesse deploment estamos falando: Quando esse deployment for criado, a serviceAccount desse deployment que vai utilizar, os pods que vao ser criados em cima dessa serviceaccount vai ser o server. E o server como serviceaccount vai ter a role chamada de server-read, que dá acesso a nós listarmos, tantos os nossos pods, como os nossos services etc. Fora isso nao dá mais para fazer nada. 
+
+Em tese, agora, a nossa aplicaçao, se alguem for ter acesso a ela, nao iria conseguir escalar esse acesso para o restante do nosso cluster k8s.
+
+Vamos aplicar:
+
+```bash
+❯ kubectl apply -f k8s/namespaces/deployment.yaml 
+deployment.apps/server created
+```
+
+```bash
+❯ kubectl get po
+NAME                        READY   STATUS    RESTARTS        AGE
+...
+server-7d6c74d698-n7xsv     1/1     Running   0               79s
+```
+
+Vamos descrevê-lo
+
+```bash
+❯ kubectl describe po server-7d6c74d698-n7xsv
+Name:             server-7d6c74d698-n7xsv
+Namespace:        default
+Priority:         0
+Service Account:  server
+Node:             k3d-fullcycle-server-0/172.21.0.2
+Start Time:       Fri, 10 Feb 2023 21:33:14 -0300
+Labels:           app=server
+                  pod-template-hash=7d6c74d698
+Annotations:      <none>
+Status:           Running
+IP:               10.42.0.14
+IPs:
+  IP:           10.42.0.14
+Controlled By:  ReplicaSet/server-7d6c74d698
+Containers:
+  server:
+    Container ID:   containerd://a75dc1261860b73c218bc8d183f831a6f247f003b70b908b9a31bf47811457e3
+    Image:          rogeriocassares/hello-express
+    Image ID:       docker.io/rogeriocassares/hello-express@sha256:06997702425f89e928b0bc89ca3aa8db5c2b8489ed0d256607d822e5c2a07d43
+    Port:           3000/TCP
+    Host Port:      0/TCP
+    State:          Running
+      Started:      Fri, 10 Feb 2023 21:33:47 -0300
+    Ready:          True
+    Restart Count:  0
+    Limits:
+      cpu:     500m
+      memory:  128Mi
+    Requests:
+      cpu:        500m
+      memory:     128Mi
+    Environment:  <none>
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-mxlgv (ro)
+Conditions:
+  Type              Status
+  Initialized       True 
+  Ready             True 
+  ContainersReady   True 
+  PodScheduled      True 
+Volumes:
+  kube-api-access-mxlgv:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    ConfigMapOptional:       <nil>
+    DownwardAPI:             true
+QoS Class:                   Guaranteed
+Node-Selectors:              <none>
+Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+Events:
+  Type    Reason     Age    From               Message
+  ----    ------     ----   ----               -------
+  Normal  Scheduled  2m36s  default-scheduler  Successfully assigned default/server-7d6c74d698-n7xsv to k3d-fullcycle-server-0
+  Normal  Pulling    2m24s  kubelet            Pulling image "rogeriocassares/hello-express"
+  Normal  Pulled     2m4s   kubelet            Successfully pulled image "rogeriocassares/hello-express" in 20.237085134s
+  Normal  Created    2m4s   kubelet            Created container server
+  Normal  Started    2m4s   kubelet            Started container server
+```
+
+
+
+E agora vamos ver se ,udou em Mounts e vimos que ele nao esta mais usando o default, e sim o token! 
+
+Entao se alguem agora de dentro daquele nosso Pod tentar acessar aapi do k8s simplesmente nao vai conseguir pq ele nao tem permissoes para isso. 
+
+E somente de fazer isso, mesmo sendo algo muito simples como copiar, colar e aplicar em nossos pods, já teremmos uma super paz de espirito pq no minimo trouxemos um poc mais de segurança para o nosso cluster k8s.
+
+
+
+### Cluster Role
+
+Algumas diferenças sutis que temos nos Roles e no RoleBinding.
+
+O que que acontece é que quando fizemos as configurações e criamos o nsso Role server-read etc, ele dá acesso aos componentes dos apiGroups baseados dentro do namespace que estávamos colocando pq o role vai trabalhar apenas no namespace que utilizamos ali por padrao. 
+
+Agora, e se quiséssemos fazer isso em relacao ao cluster como um todo? E se quiséssemos que em algum ommento todo mundo que tivesse ali, por exemplo em nosso serviceaccount server pudesse listar, watch, get e pegar as informaçoes de todos os pods que ele está trabalhando? COmo conseguiriamos ampliar todo esse escopo ali para gente. 
+
+Nesse caso temos um outro tipo de role que consegumis fazer e isso acaba expandindo de forma geral para todo o nosso cluster e nao somente ali focado em nosso namespace. Para isso, o objeto é similar, mas outro. 
+
+
+
+Ao inves de colocarmos Role, colocaremos ClusterROle. Entao esse grpo de permissionamento que estamos colocando é agora em nivel de CLuster!
+
+ E a mesma coisa ali no RoleBinding! COlocaremos ClusterRoleBinding.
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: server
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: server-read
+rules:
+- apiGroups: [""]
+  resources: ["pods, services"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "watch", "list"]
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: server-read-bind
+subjects:
+- kind: ServiceAccount
+  name: server
+  namespace: prod
+roleRef:
+  kind: ClusterRole
+  name: server-read
+  apiGroup: rbac.authorization.k8s.io
+
+
+
+```
+
+Entao quando aplicamos esse arquivo, esse novo nivel de permissao começa a ser aplicado a nivel de cluster.
+
+```bash
+❯ kubectl apply -f k8s/namespaces/security.yaml  
+serviceaccount/server unchanged
+clusterrole.rbac.authorization.k8s.io/server-read created
+clusterrolebinding.rbac.authorization.k8s.io/server-read-bind created
+```
+
+
+
+Agora, por exemplo, se alguem acessar o nosso pod e tentar pegar quais sao os Pods que estao no namespace kubesystem, esse cara vai conseguir pq estamos utilizando o CLusterROle, isto é, dando acesso ao cluster de forma geral e nao mais somente àquele namespace. 
+
+Esse tipo de coisa é muito importante entendermos pelo menos as diferen~ca. 
+
+COmo devs de forma geral nao precisamos ir no detalhe, mas tratando0se dessa segurança basica, que nao é algo tao dificil, vale muito apena entendermos e como podemos fazer.
+
+De forma geral, o Wesey costuma trabalhar apenas com Role e RoleBinding pq estamos focando na granularidade da nossa aplicaç"ao que estamos colocando no ar.
+
+Normalmente, se estivermos querendo gerenciar o nosso cluster de forma mais geral, que normalmente nao é dev que façam mas pode vir a ser, ai podemos trabalhar com CLusterRole e ClusterRoleBinding!
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
